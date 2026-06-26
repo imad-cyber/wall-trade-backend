@@ -4,6 +4,7 @@ Provides common fields and configuration for all data models.
 """
 from datetime import datetime
 from pydantic import BaseModel, ConfigDict
+from typing import Optional
 
 
 class BaseSchema(BaseModel):
@@ -22,7 +23,7 @@ class TimestampedSchema(BaseSchema):
     """Schema with timestamp fields."""
 
     created_at: datetime 
-    updated_at: datetime = None
+    updated_at: Optional[datetime] = None
 
     class Config:
         """Pydantic config."""
@@ -34,8 +35,8 @@ class ResponseSchema(BaseSchema):
 
     success: bool
     message: str
-    data: dict = None
-    error: dict = None
+    data: Optional[dict] = None
+    error: Optional[dict] = None
 
 
 class PaginationSchema(BaseSchema):
@@ -50,4 +51,4 @@ class PaginationSchema(BaseSchema):
 class PaginatedResponseSchema(ResponseSchema):
     """Paginated response schema."""
 
-    pagination: PaginationSchema = None
+    pagination: Optional[PaginationSchema] = None
