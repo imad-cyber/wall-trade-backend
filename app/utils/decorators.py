@@ -1,50 +1,38 @@
 """
-Utility functions and helper classes.
+Utility decorators — timing and retry with tenacity integration.
 """
 from functools import wraps
 from typing import Any, Callable
-from app.core import get_logger
+
+from tenacity import retry, stop_after_attempt, wait_exponential
+
+from app.core.logging import get_logger
 
 logger = get_logger(__name__)
 
 
 def timing_decorator(func: Callable) -> Callable:
-    """
-    Decorator to measure function execution time.
-    
-    Args:
-        func: Function to decorate
-        
-    Returns:
-        Callable: Decorated function
-    """
+    """Decorator to measure function execution time."""
     import time
 
     @wraps(func)
     async def async_wrapper(*args, **kwargs) -> Any:
         start_time = time.time()
         try:
-            result = await func(*args, **kwargs)
-            return result
+            return await func(*args, **kwargs)
         finally:
             elapsed_time = time.time() - start_time
-            logger.info(
-                f"Function {func.__name__} executed in {elapsed_time:.2f} seconds"
-            )
+            logger.info("Function %s executed in %.2fs", func.__name__, elapsed_time)
 
     @wraps(func)
     def sync_wrapper(*args, **kwargs) -> Any:
         start_time = time.time()
         try:
-            result = func(*args, **kwargs)
-            return result
+            return func(*args, **kwargs)
         finally:
             elapsed_time = time.time() - start_time
-            logger.info(
-                f"Function {func.__name__} executed in {elapsed_time:.2f} seconds"
-            )
+            logger.info("Function %s executed in %.2fs", func.__name__, elapsed_time)
 
-    # Check if function is async
     import asyncio
 
     if asyncio.iscoroutinefunction(func):
@@ -57,67 +45,26 @@ def retry_decorator(
     delay: float = 1.0,
     backoff: float = 2.0,
 ) -> Callable:
-    """
-    Decorator to retry function execution with exponential backoff.
-    
-    Args:
-        max_attempts: Maximum number of retry attempts
-        delay: Initial delay between retries in seconds
-        backoff: Backoff multiplier for exponential backoff
-        
-    Returns:
-        Callable: Decorator function
-    """
+    """Decorator using tenacity for retries with exponential backoff."""
+
     def decorator(func: Callable) -> Callable:
+        @retry(
+            stop=stop_after_attempt(max_attempts),
+            wait=wait_exponential(multiplier=delay, min=delay, max=delay * backoff ** max_attempts),
+            reraise=True,
+        )
         @wraps(func)
         async def async_wrapper(*args, **kwargs) -> Any:
-            import asyncio
-            
-            attempt = 0
-            current_delay = delay
-            
-            while attempt < max_attempts:
-                try:
-                    return await func(*args, **kwargs)
-                except Exception as e:
-                    attempt += 1
-                    if attempt >= max_attempts:
-                        logger.error(
-                            f"Function {func.__name__} failed after {max_attempts} attempts"
-                        )
-                        raise
-                    
-                    logger.warning(
-                        f"Function {func.__name__} failed (attempt {attempt}/{max_attempts}), "
-                        f"retrying in {current_delay:.2f} seconds: {str(e)}"
-                    )
-                    await asyncio.sleep(current_delay)
-                    current_delay *= backoff
+            return await func(*args, **kwargs)
 
+        @retry(
+            stop=stop_after_attempt(max_attempts),
+            wait=wait_exponential(multiplier=delay, min=delay, max=delay * backoff ** max_attempts),
+            reraise=True,
+        )
         @wraps(func)
         def sync_wrapper(*args, **kwargs) -> Any:
-            import time
-            
-            attempt = 0
-            current_delay = delay
-            
-            while attempt < max_attempts:
-                try:
-                    return func(*args, **kwargs)
-                except Exception as e:
-                    attempt += 1
-                    if attempt >= max_attempts:
-                        logger.error(
-                            f"Function {func.__name__} failed after {max_attempts} attempts"
-                        )
-                        raise
-                    
-                    logger.warning(
-                        f"Function {func.__name__} failed (attempt {attempt}/{max_attempts}), "
-                        f"retrying in {current_delay:.2f} seconds: {str(e)}"
-                    )
-                    time.sleep(current_delay)
-                    current_delay *= backoff
+            return func(*args, **kwargs)
 
         import asyncio
 

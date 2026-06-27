@@ -3,7 +3,7 @@ pytest configuration and fixtures.
 """
 import pytest
 import asyncio
-from app.config import get_settings
+from app.core.config import get_settings
 from app.main import create_app
 
 

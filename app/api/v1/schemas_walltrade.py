@@ -1,5 +1,6 @@
 """
-Wall-Trade MVP request/response schemas.
+Wall-Trade MVP request/response schemas (DTOs only).
+Response envelope: app.api.v1.schemas.envelope.APIResponse
 """
 from datetime import datetime
 from decimal import Decimal
@@ -9,19 +10,9 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field
 
 
-class ApiResponse(BaseModel):
-    """Standard documented response envelope."""
+class ServiceUnavailableDetail(BaseModel):
+    """Detail payload for 503 responses when external services are not configured."""
 
-    success: bool = True
-    message: str
-    data: Any = None
-
-
-class ServiceUnavailableResponse(BaseModel):
-    """Response body for endpoints waiting on external service credentials."""
-
-    success: bool = False
-    message: str
     missing_configuration: list[str]
 
 

@@ -33,7 +33,21 @@ class DatabaseError(AppException):
     """Raised when database operations fail."""
 
     def __init__(self, message: str, error_code: str = "DATABASE_ERROR"):
-        super().__init__(message, status_code=500, error_code=error_code)
+        super().__init__(message, status_code=503, error_code=error_code)
+
+
+class AIProviderError(AppException):
+    """Raised when an AI provider call fails."""
+
+    def __init__(self, message: str, error_code: str = "AI_PROVIDER_ERROR"):
+        super().__init__(message, status_code=502, error_code=error_code)
+
+
+class RateLimitError(AppException):
+    """Raised when rate limits are exceeded."""
+
+    def __init__(self, message: str = "Rate limit exceeded", error_code: str = "RATE_LIMIT_ERROR"):
+        super().__init__(message, status_code=429, error_code=error_code)
 
 
 class AuthenticationError(AppException):

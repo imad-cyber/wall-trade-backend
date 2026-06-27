@@ -1,17 +1,22 @@
-"""Core module - contains exception handlers and logging configuration."""
+"""Core module — config, logging, exceptions."""
+from app.core.config import Settings, get_settings
 from app.core.exceptions import (
+    AIProviderError,
     AppException,
-    ValidationError,
-    DatabaseError,
     AuthenticationError,
     AuthorizationError,
-    ResourceNotFoundError,
     ConflictError,
+    DatabaseError,
     ExternalServiceError,
+    RateLimitError,
+    ResourceNotFoundError,
+    ValidationError,
 )
-from app.core.logging_config import setup_logging, get_logger
+from app.core.logging import get_logger, setup_logging
 
 __all__ = [
+    "Settings",
+    "get_settings",
     "AppException",
     "ValidationError",
     "DatabaseError",
@@ -20,6 +25,8 @@ __all__ = [
     "ResourceNotFoundError",
     "ConflictError",
     "ExternalServiceError",
+    "AIProviderError",
+    "RateLimitError",
     "setup_logging",
     "get_logger",
 ]

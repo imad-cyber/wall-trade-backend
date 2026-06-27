@@ -2,7 +2,7 @@
 API v1 endpoints - health check and status endpoints.
 """
 from fastapi import APIRouter, status
-from app.config import get_settings
+from app.core.config import get_settings
 
 router = APIRouter(tags=["health"])
 

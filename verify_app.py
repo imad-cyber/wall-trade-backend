@@ -13,7 +13,7 @@ print("🔍 Verifying Wall-Trade-Backend configuration...\n")
 # Test 1: Load settings
 print("✓ Test 1: Loading environment variables from .env")
 try:
-    from app.config import get_settings
+    from app.core.config import get_settings
     settings = get_settings()
     print(f"  ✅ Settings loaded successfully!")
     print(f"     - APP_NAME: {settings.APP_NAME}")

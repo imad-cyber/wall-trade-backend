@@ -1,11 +1,3 @@
-"""
-Services module initialization.
-Central point for service imports.
-"""
+"""Service layer package — import services directly from submodules."""
 
-# Import services when implemented
-# Example:
-# from app.services.psx_service import PSXService
-# from app.services.capital_stake import CapitalStakeService
-
-__all__ = []
+__all__: list[str] = []

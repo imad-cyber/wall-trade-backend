@@ -21,7 +21,7 @@ if VENV_PYTHON.exists() and Path(sys.executable).resolve() != VENV_PYTHON:
 sys.path.insert(0, str(PROJECT_ROOT))
 
 from app.main import create_app
-from app.config import get_settings
+from app.core.config import get_settings
 import uvicorn
 
 

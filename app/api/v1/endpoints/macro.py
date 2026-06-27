@@ -1,31 +1,27 @@
 """Macro market snapshot endpoint."""
 from fastapi import APIRouter, Depends, status
 
-from app.auth import get_current_supabase_user
-from app.dependencies import get_db_dependency
-from app.api.v1.schemas_walltrade import ApiResponse
-from app.services.supabase_db import SupabaseDBService
+from app.api.v1.dependencies import get_macro_service
+from app.api.v1.schemas.envelope import make_response
+from app.auth.dependencies import get_current_supabase_user
+from app.services.macro_service import MacroService
 
 router = APIRouter(prefix="/macro", tags=["macro"])
 
 
-@router.get("", response_model=ApiResponse, status_code=status.HTTP_200_OK)
+@router.get("", status_code=status.HTTP_200_OK)
 async def get_macro_snapshot(
-    db=Depends(get_db_dependency),
+    service: MacroService = Depends(get_macro_service),
     user=Depends(get_current_supabase_user),
 ):
-    """Return the latest cached macro snapshot from Supabase."""
-    macro = SupabaseDBService(db).get_latest_macro()
-    return ApiResponse(
-        message="Macro snapshot retrieved successfully" if macro else "No macro snapshot found",
-        data=macro,
-    )
+    macro = service.get_latest()
+    data = macro.model_dump(mode="json") if macro else None
+    return make_response(data, cache_hit=macro is not None)
 
 
-@router.get("/indicators", response_model=ApiResponse, status_code=status.HTTP_200_OK)
+@router.get("/indicators", status_code=status.HTTP_200_OK)
 async def get_macro_indicators(
-    db=Depends(get_db_dependency),
+    service: MacroService = Depends(get_macro_service),
     user=Depends(get_current_supabase_user),
 ):
-    """Backward-compatible alias for the macro snapshot."""
-    return await get_macro_snapshot(db=db, user=user)
+    return await get_macro_snapshot(service=service, user=user)
