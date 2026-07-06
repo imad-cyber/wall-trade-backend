@@ -8,6 +8,7 @@ from jose import jwt
 from app.auth.jwt import AuthService
 from app.auth.supabase_auth import validate_supabase_token
 from app.core.config import Settings
+from app.core.exceptions import AuthenticationError
 
 
 class TestAuthService:
@@ -56,12 +57,13 @@ class TestSupabaseAuth:
 
     def test_missing_bearer_token(self):
         settings = Settings(SUPABASE_JWT_SECRET="secret", ENVIRONMENT="production")
-        with pytest.raises(HTTPException) as exc:
+        with pytest.raises(AuthenticationError) as exc:
             validate_supabase_token(None, settings)
-        assert exc.value.status_code == 401
+        assert exc.value.error_code == "TOKEN_MISSING"
 
     def test_invalid_token(self):
         settings = Settings(SUPABASE_JWT_SECRET="secret", ENVIRONMENT="production")
         creds = type("Creds", (), {"credentials": "bad.token"})()
-        with pytest.raises(HTTPException):
+        with pytest.raises(AuthenticationError) as exc:
             validate_supabase_token(creds, settings)
+        assert exc.value.error_code == "TOKEN_INVALID"

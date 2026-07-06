@@ -5,7 +5,7 @@ Consolidated from app/config/settings.py with additional provider and cache fiel
 from functools import lru_cache
 from typing import Optional
 
-from pydantic import field_validator
+from pydantic import field_validator, model_validator
 from pydantic_settings import BaseSettings
 
 
@@ -32,10 +32,12 @@ class Settings(BaseSettings):
     SUPABASE_JWT_SECRET: Optional[str] = None
     DATABASE_URL: Optional[str] = None
 
-    # External APIs
+    # External APIs — Capital Stake (csapis.com)
     CAPITAL_API_KEY: Optional[str] = None
     CAPITAL_STAKE_API_KEY: Optional[str] = None
     CAPITAL_STAKE_BASE_URL: Optional[str] = None
+    CAPITAL_STAKE_UAT_TOKEN: Optional[str] = None
+    CAPITAL_STAKE_PROD_TOKEN: Optional[str] = None
     AI_API_KEY: Optional[str] = None
     OPENAI_API_KEY: Optional[str] = None
     PSX_PROXY_URL: Optional[str] = None
@@ -93,6 +95,22 @@ class Settings(BaseSettings):
             raise ValueError(f"LOG_LEVEL must be one of {allowed}")
         return v.upper()
 
+    @model_validator(mode="after")
+    def validate_production_secrets(self) -> "Settings":
+        if self.is_production:
+            missing: list[str] = []
+            if not self.SUPABASE_JWT_SECRET:
+                missing.append("SUPABASE_JWT_SECRET")
+            if not self.supabase_database_key:
+                missing.append("SUPABASE_SERVICE_ROLE_KEY")
+            if not self.capital_stake_token:
+                missing.append("CAPITAL_STAKE_PROD_TOKEN or CAPITAL_STAKE_UAT_TOKEN")
+            if missing:
+                raise ValueError(
+                    f"Production requires: {', '.join(missing)}"
+                )
+        return self
+
     @property
     def is_production(self) -> bool:
         return self.ENVIRONMENT == "production"
@@ -108,6 +126,24 @@ class Settings(BaseSettings):
     @property
     def capital_stake_key(self) -> Optional[str]:
         return self.CAPITAL_STAKE_API_KEY or self.CAPITAL_API_KEY
+
+    @property
+    def capital_stake_token(self) -> Optional[str]:
+        if self.is_production:
+            return (
+                self.CAPITAL_STAKE_PROD_TOKEN
+                or self.capital_stake_key
+                or self.CAPITAL_STAKE_UAT_TOKEN
+            )
+        return self.CAPITAL_STAKE_UAT_TOKEN or self.capital_stake_key
+
+    @property
+    def capital_stake_base_url(self) -> str:
+        if self.CAPITAL_STAKE_BASE_URL:
+            return self.CAPITAL_STAKE_BASE_URL.rstrip("/")
+        if self.is_production:
+            return "https://csapis.com"
+        return "https://uat.csapis.com"
 
     @property
     def psx_proxy_base_url(self) -> Optional[str]:

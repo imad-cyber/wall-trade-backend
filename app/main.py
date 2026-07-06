@@ -1,7 +1,7 @@
 """
 Application factory and FastAPI configuration.
 """
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse, Response
 
@@ -11,7 +11,7 @@ from app.core.exceptions import AppException
 from app.core.lifespan import lifespan
 from app.core.logging import get_logger, setup_logging
 from app.core.middleware import register_middleware
-from app.api.v1.schemas.envelope import ErrorDetail, APIResponse, Meta, make_error_response
+from app.api.v1.schemas.envelope import make_error_response
 from app.observability.metrics import metrics_response
 
 logger = get_logger(__name__)
@@ -31,38 +31,72 @@ def create_app() -> FastAPI:
     register_middleware(app, settings)
 
     @app.exception_handler(AppException)
-    async def app_exception_handler(request, exc: AppException):
+    async def app_exception_handler(request: Request, exc: AppException):
         logger.error("Application error: %s - %s", exc.error_code, exc.message)
-        body = make_error_response(exc.error_code, exc.message)
+        body = make_error_response(
+            exc.error_code,
+            exc.message,
+            path=str(request.url.path),
+        )
         return JSONResponse(status_code=exc.status_code, content=body.model_dump())
 
     @app.exception_handler(RequestValidationError)
-    async def validation_exception_handler(request, exc: RequestValidationError):
+    async def validation_exception_handler(request: Request, exc: RequestValidationError):
         logger.warning("Validation error: %s", exc.errors())
-        body = APIResponse(
-            success=False,
-            data=None,
-            meta=Meta(),
-            errors=[
-                ErrorDetail(code="VALIDATION_ERROR", message="Request validation failed"),
-            ],
+        body = make_error_response(
+            "VALIDATION_ERROR",
+            "Request validation failed",
+            path=str(request.url.path),
+            details=exc.errors(),
         )
         return JSONResponse(status_code=422, content=body.model_dump())
 
+    @app.exception_handler(HTTPException)
+    async def http_exception_handler(request: Request, exc: HTTPException):
+        detail = exc.detail
+        if isinstance(detail, dict) and "error" in detail:
+            return JSONResponse(status_code=exc.status_code, content=detail)
+
+        code = "INTERNAL_ERROR"
+        message = str(detail)
+        if exc.status_code == 401:
+            code = "TOKEN_INVALID"
+        elif exc.status_code == 403:
+            code = "FORBIDDEN"
+        elif exc.status_code == 404:
+            code = "NOT_FOUND"
+        elif exc.status_code == 503:
+            code = "SERVICE_UNAVAILABLE"
+
+        body = make_error_response(code, message, path=str(request.url.path))
+        return JSONResponse(
+            status_code=exc.status_code,
+            content=body.model_dump(),
+            headers=getattr(exc, "headers", None),
+        )
+
     @app.exception_handler(Exception)
-    async def general_exception_handler(request, exc: Exception):
+    async def general_exception_handler(request: Request, exc: Exception):
         logger.error("Unexpected error: %s", exc, exc_info=True)
-        body = make_error_response("INTERNAL_SERVER_ERROR", "An unexpected error occurred")
+        body = make_error_response(
+            "INTERNAL_ERROR",
+            "An unexpected error occurred",
+            path=str(request.url.path),
+        )
         return JSONResponse(status_code=500, content=body.model_dump())
 
     @app.get("/health", tags=["health"])
     async def root_health_check():
-        return {
-            "status": "healthy",
-            "application": settings.APP_NAME,
-            "version": settings.APP_VERSION,
-            "environment": settings.ENVIRONMENT,
-        }
+        from app.api.v1.schemas.envelope import make_response
+
+        return make_response(
+            {
+                "status": "ok",
+                "application": settings.APP_NAME,
+                "version": settings.APP_VERSION,
+                "environment": settings.ENVIRONMENT,
+            }
+        ).model_dump()
 
     @app.get("/metrics", tags=["observability"], include_in_schema=False)
     async def prometheus_metrics():

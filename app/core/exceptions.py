@@ -82,6 +82,7 @@ class ConflictError(AppException):
 class ExternalServiceError(AppException):
     """Raised when external service calls fail."""
 
-    def __init__(self, service: str, message: str, error_code: str = "EXTERNAL_SERVICE_ERROR"):
+    def __init__(self, service: str, message: str, error_code: str = "PROVIDER_ERROR"):
         full_message = f"{service} error: {message}"
-        super().__init__(full_message, status_code=502, error_code=error_code)
+        status_code = 503 if error_code == "SERVICE_UNAVAILABLE" else 502
+        super().__init__(full_message, status_code=status_code, error_code=error_code)

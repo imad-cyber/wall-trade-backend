@@ -18,3 +18,15 @@ class ProfileRepository(BaseRepository):
             return self.update(user_id, payload, id_column="id") or existing
         payload["id"] = user_id
         return self.create(payload)
+
+    def get_beta_signup(self, email: str) -> Optional[dict[str, Any]]:
+        rows = self.list(limit=1, filters={"email": email.lower()})
+        return rows[0] if rows else None
+
+    def create_beta_signup(self, email: str) -> dict[str, Any]:
+        response = self._execute(
+            self.db.table("beta_user_sign_up").insert({"email": email.lower()}),
+            operation="create_beta_signup",
+        )
+        rows = self._data(response) or []
+        return rows[0] if rows else {"email": email.lower()}

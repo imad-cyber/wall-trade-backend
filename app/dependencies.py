@@ -29,6 +29,11 @@ async def get_db_dependency(
     yield get_supabase_client()
 
 
+async def get_service_db_dependency() -> Generator:
+    """Yield service-role Supabase client for BFF data access."""
+    yield get_supabase_client()
+
+
 async def verify_environment() -> bool:
     settings = get_settings()
     if not settings.SUPABASE_URL or not settings.supabase_database_key:

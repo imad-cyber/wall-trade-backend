@@ -1,10 +1,15 @@
 """FastAPI auth dependencies."""
+from typing import Any, Optional
+
 from fastapi import Depends, HTTPException, status
-from fastapi.security import HTTPAuthorizationCredentials
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from app.auth.jwt import AuthService, security
 from app.auth.supabase_auth import validate_supabase_token
 from app.core.config import Settings, get_settings
+from app.core.exceptions import AuthenticationError
+
+optional_bearer = HTTPBearer(auto_error=False)
 
 
 async def get_current_user(
@@ -28,11 +33,26 @@ async def get_current_user(
     return {"user_id": user_id, **payload}
 
 
+async def get_optional_user(
+    credentials: Optional[HTTPAuthorizationCredentials] = Depends(optional_bearer),
+    settings: Settings = Depends(get_settings),
+) -> Optional[dict[str, Any]]:
+    """Return authenticated user payload or None for public/tiered routes."""
+    if credentials is None:
+        return None
+    return validate_supabase_token(credentials, settings, optional=False)
+
+
 async def get_current_supabase_user(
     credentials: HTTPAuthorizationCredentials = Depends(security),
     settings: Settings = Depends(get_settings),
 ) -> dict:
     """Validate Supabase JWT for protected Wall-Trade endpoints."""
-    if not settings.SUPABASE_JWT_SECRET and settings.is_development:
-        return {"user_id": "development", "role": "authenticated"}
-    return validate_supabase_token(credentials, settings)
+    if not settings.SUPABASE_JWT_SECRET:
+        if settings.is_development:
+            return {"user_id": "development", "role": "authenticated"}
+        raise AuthenticationError(
+            "Authentication is not configured",
+            error_code="TOKEN_INVALID",
+        )
+    return validate_supabase_token(credentials, settings, optional=False)

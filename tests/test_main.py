@@ -18,22 +18,23 @@ class TestHealthCheck:
     """Test health check endpoint."""
 
     def test_health_check(self, client):
-        """Test health check returns 200."""
+        """Test health check returns 200 with contract envelope."""
         response = client.get("/health")
         assert response.status_code == 200
         data = response.json()
-        assert data["status"] == "healthy"
-        assert "application" in data
-        assert "version" in data
-        assert "environment" in data
+        assert data["data"]["status"] == "ok"
+        assert "application" in data["data"]
+        assert "version" in data["data"]
+        assert "environment" in data["data"]
+        assert "request_id" in data
 
     def test_health_check_response_structure(self, client):
         """Test health check response structure."""
         response = client.get("/health")
         data = response.json()
         assert isinstance(data, dict)
-        assert "status" in data
-        assert data["status"] == "healthy"
+        assert "data" in data
+        assert data["data"]["status"] == "ok"
 
 
 class TestExceptionHandling:
