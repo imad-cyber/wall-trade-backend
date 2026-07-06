@@ -47,7 +47,9 @@ class SearchService:
         universe = await self._get_universe()
         results: list[SearchResult] = []
         for item in universe:
-            ticker = str(item.get("ticker", item.get("symbol", ""))).upper()
+            ticker = str(item.get("ticker", item.get("symbol", item.get("s", "")))).upper()
+            if item.get("m") == "IDX":
+                continue
             name = str(item.get("name", item.get("companyName", ticker)))
             if ticker.startswith(q) or q in name.upper():
                 results.append(SearchResult(

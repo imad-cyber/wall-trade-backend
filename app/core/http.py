@@ -80,8 +80,12 @@ class AsyncHTTPClient:
         )
         return response.json()
 
-    async def get(self, path: str, **params) -> dict[str, Any]:
-        return await self._request("GET", path, params=params or None)
+    async def get(
+        self,
+        path: str,
+        params: Optional[dict[str, Any]] = None,
+    ) -> dict[str, Any]:
+        return await self._request("GET", path, params=params)
 
     async def post(self, path: str, body: Optional[dict] = None) -> dict[str, Any]:
         return await self._request("POST", path, json=body or {})
@@ -96,9 +100,18 @@ def get_http_client(
     api_key: Optional[str] = None,
 ) -> AsyncHTTPClient:
     """Get or create a named HTTP client from the registry."""
-    if name not in _registry:
-        _registry[name] = AsyncHTTPClient(base_url, api_key=api_key, provider_name=name)
-    return _registry[name]
+    registry_key = f"{name}:{base_url.rstrip('/')}"
+    existing = _registry.get(registry_key)
+    if existing is not None:
+        if api_key and existing.api_key != api_key:
+            existing.api_key = api_key
+        return existing
+    _registry[registry_key] = AsyncHTTPClient(
+        base_url,
+        api_key=api_key,
+        provider_name=name,
+    )
+    return _registry[registry_key]
 
 
 def get_http_client_registry() -> dict[str, AsyncHTTPClient]:

@@ -142,8 +142,8 @@ class Settings(BaseSettings):
         if self.CAPITAL_STAKE_BASE_URL:
             return self.CAPITAL_STAKE_BASE_URL.rstrip("/")
         if self.is_production:
-            return "https://csapis.com"
-        return "https://uat.csapis.com"
+            return "https://csapis.com/3.0"
+        return "https://uat.csapis.com/3.0"
 
     @property
     def psx_proxy_base_url(self) -> Optional[str]:

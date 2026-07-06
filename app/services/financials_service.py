@@ -32,9 +32,13 @@ class FinancialsService:
             )
 
         if period == "quarterly":
-            raw = self.capital_stake._unwrap_data(await self.capital_stake.get_key_metrics_quarterly(ticker))
+            raw = self.capital_stake._unwrap_data(
+                await self.capital_stake.get_financial_statement(ticker, statement_type, "quarterly")
+            )
         else:
-            raw = self.capital_stake._unwrap_data(await self.capital_stake.get_financial_data(ticker))
+            raw = self.capital_stake._unwrap_data(
+                await self.capital_stake.get_financial_statement(ticker, statement_type, "annual")
+            )
 
         result = map_financial_statement(ticker, raw, statement_type, period)
         result.rows = result.rows[:years]

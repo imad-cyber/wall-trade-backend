@@ -28,7 +28,6 @@ import uvicorn
 def _can_bind(host: str, port: int) -> bool:
     """Return True when host:port can be bound by this process."""
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
-        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         try:
             sock.bind((host, port))
         except OSError:

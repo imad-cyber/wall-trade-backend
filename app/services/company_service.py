@@ -102,7 +102,22 @@ class CompanyService:
 
         async def fetch():
             quote = self.capital_stake._unwrap_data(await self.capital_stake.get_single_quote(ticker))
-            metrics = self.capital_stake._unwrap_data(await self.capital_stake.get_financial_data(ticker))
+            metrics: dict[str, Any] = {}
+            try:
+                metrics = self.capital_stake._unwrap_data(await self.capital_stake.get_consensus_ratings(ticker))
+                earnings = metrics.get("earnings") if isinstance(metrics.get("earnings"), dict) else {}
+                valuation = metrics.get("valuation") if isinstance(metrics.get("valuation"), dict) else {}
+                dividend = metrics.get("dividend") if isinstance(metrics.get("dividend"), dict) else {}
+                metrics = {
+                    **quote,
+                    **earnings,
+                    **valuation,
+                    **dividend,
+                    "pe_current": valuation.get("pe_current"),
+                    "yield_estimate": dividend.get("yield_estimate"),
+                }
+            except ExternalServiceError:
+                metrics = quote
             return map_statistics(ticker, quote, metrics, tier=tier)
 
         return await self._cached(cache_key, STATS_CACHE_TTL, fetch)
@@ -139,7 +154,9 @@ class CompanyService:
 
         async def fetch():
             validate_ohlcv_params("2y", "1d")
-            raw = self.capital_stake._unwrap_data(await self.capital_stake.get_eod_data(ticker))
+            raw = self.capital_stake._unwrap_data(
+                await self.capital_stake.get_eod_for_range(ticker, "2y")
+            )
             ohlcv = map_ohlcv(ticker, raw, "2y", "1d")
             return compute_period_returns(ticker, ohlcv.points)
 

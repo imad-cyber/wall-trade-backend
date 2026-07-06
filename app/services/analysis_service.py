@@ -13,7 +13,8 @@ from app.domain.analysis.models import AnalysisCache
 from app.providers.capital_stake.client import CapitalStakeClient
 from app.providers.capital_stake.extended_mapper import (
     _rows_from_list,
-    map_analyst,
+    map_analyst_from_consensus,
+    map_analyst_from_targets,
     map_earnings_call,
     map_swot,
     map_technical,
@@ -74,11 +75,30 @@ class AnalysisService:
         quote = await self.capital_stake.get_stock_quote(ticker)
         ratings_raw: list[dict] = []
         try:
+            consensus = self.capital_stake._unwrap_data(
+                await self.capital_stake.get_consensus_ratings(ticker)
+            )
+            if isinstance(consensus, dict):
+                result = map_analyst_from_consensus(ticker, consensus, quote.price, page, limit)
+                self._memory.set(cache_key, result, CACHE_ANALYST)
+                return result, False, 0
+        except Exception:
+            pass
+        try:
+            targets = self.capital_stake._unwrap_data(await self.capital_stake.get_analyst_targets(ticker))
+            if isinstance(targets, list) and targets:
+                result = map_analyst_from_targets(ticker, targets, quote.price, page, limit)
+                self._memory.set(cache_key, result, CACHE_ANALYST)
+                return result, False, 0
+        except Exception:
+            pass
+        try:
             rows = self.analysis_repo.list(limit=100, filters={"ticker": ticker.upper()})
             ratings_raw = rows
         except Exception:
             ratings_raw = []
 
+        from app.providers.capital_stake.extended_mapper import map_analyst
         result = map_analyst(ticker, ratings_raw, page, limit, quote.price)
         self._memory.set(cache_key, result, CACHE_ANALYST)
         return result, False, 0
@@ -115,7 +135,10 @@ class AnalysisService:
         try:
             news = self.capital_stake._unwrap_data(await self.capital_stake.get_company_news(ticker))
             articles = _rows_from_list(news)
-            earnings_articles = [a for a in articles if "earnings" in str(a.get("headline", "")).lower()]
+            earnings_articles = [
+                a for a in articles
+                if "earnings" in str(a.get("headline", a.get("title", ""))).lower()
+            ]
             if earnings_articles:
                 return map_earnings_call(ticker, earnings_articles[0])
         except Exception:

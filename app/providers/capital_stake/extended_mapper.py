@@ -79,6 +79,20 @@ def _rows_from_list(raw: Any) -> list[dict[str, Any]]:
     return []
 
 
+def _map_v3_market_state(state: str) -> str:
+    mapping = {
+        "OPN": "Open",
+        "PRE": "Pre-Market",
+        "RED": "Pre-Market",
+        "PCL": "After-Hours",
+        "BRK": "Closed",
+        "HLT": "Closed",
+        "CBR": "Closed",
+        "SUS": "Closed",
+    }
+    return mapping.get(str(state).strip().upper(), "Closed")
+
+
 def map_ohlcv(ticker: str, raw: dict[str, Any], range_: str, interval: str) -> OHLCVResponse:
     rows = _rows_from_list(raw)
     points: list[OHLCVPoint] = []
@@ -93,7 +107,11 @@ def map_ohlcv(ticker: str, raw: dict[str, Any], range_: str, interval: str) -> O
         low = _to_float(_first(row, "low", "Low"), close)
         open_ = _to_float(_first(row, "open", "Open"), close)
         volume = int(_to_float(_first(row, "volume", "Volume"), 0))
-        date = str(_first(row, "date", "Date", "timestamp", default=""))[:10]
+        raw_date = _first(row, "date", "Date", "timestamp", "time", default="")
+        if isinstance(raw_date, (int, float)):
+            date = datetime.fromtimestamp(raw_date, tz=timezone.utc).strftime("%Y-%m-%d")
+        else:
+            date = str(raw_date)[:10]
         points.append(OHLCVPoint(date=date, open=open_, high=high, low=low, close=close, volume=volume))
         highs.append(high)
         lows.append(low)
@@ -112,11 +130,11 @@ FEATURED_INDEX_SYMBOLS = frozenset({"KSE100", "KSE-100", "KSE_100"})
 
 
 def _map_index_row(row: dict[str, Any]) -> MarketSummaryIndex:
-    symbol = str(_first(row, "symbol", "ticker", "code", default="")).upper()
-    name = str(_first(row, "name", "indexName", "index_name", "title", default=symbol or "Index"))
-    price = _to_float(_first(row, "lastPrice", "last_price", "price", "close", "value"), 0.0)
+    symbol = str(_first(row, "symbol", "ticker", "code", "s", default="")).upper()
+    name = str(_first(row, "name", "indexName", "index_name", "title", "s", default=symbol or "Index"))
+    price = _to_float(_first(row, "lastPrice", "last_price", "price", "close", "value", "c"), 0.0)
     change_percent = _normalize_change_percent(
-        _first(row, "changePercent", "change_percent", "pctChange", "pct_change", "change")
+        _first(row, "changePercent", "change_percent", "pctChange", "pct_change", "pch", "change")
     )
     currency = str(_first(row, "currency", default="PKR"))
     is_delayed = bool(_first(row, "delayed", "isDelayed", "is_delayed", default=False))
@@ -261,22 +279,22 @@ def map_statistics(ticker: str, quote: dict, metrics: dict, *, tier: str) -> Com
     price = _to_float(_first(q, "lastPrice", "price"), 0)
 
     trading_items = [
-        {"label": "Prev. Close", "value": str(_first(q, "previousClose", "prevClose", default=price)), "locked": False},
+        {"label": "Prev. Close", "value": str(_first(q, "previousClose", "prevClose", "ldcp", default=price)), "locked": False},
         {"label": "Open", "value": str(_first(q, "open", default="—")), "locked": False},
-        {"label": "Day's Range", "value": f"{_first(q, 'low', default='—')} - {_first(q, 'high', default='—')}", "locked": False},
-        {"label": "52 wk Range", "value": f"{_first(q, 'fiftyTwoWeekLow', default='—')} - {_first(q, 'fiftyTwoWeekHigh', default='—')}", "locked": False},
-        {"label": "Volume", "value": _fmt_large(_first(q, "volume")), "locked": False},
-        {"label": "Market Cap", "value": _fmt_large(_first(m, "marketCap", "market_cap")), "locked": False},
+        {"label": "Day's Range", "value": f"{_first(q, 'low', 'lcap', default='—')} - {_first(q, 'high', 'ucap', default='—')}", "locked": False},
+        {"label": "52 wk Range", "value": f"{_first(q, 'fiftyTwoWeekLow', 'low52', default='—')} - {_first(q, 'fiftyTwoWeekHigh', 'high52', default='—')}", "locked": False},
+        {"label": "Volume", "value": _fmt_large(_first(q, "volume", "ldcv")), "locked": False},
+        {"label": "Market Cap", "value": _fmt_large(_first(q, "marketCap", "market_cap")), "locked": False},
         {"label": "Fair Value", "value": None, "locked": True, "pro": True},
         {"label": "Fair Value Upside", "value": None, "locked": True, "pro": True},
     ]
     fundamental_items = [
-        {"label": "Revenue", "value": _fmt_large(_first(m, "revenue")), "locked": False},
-        {"label": "Net Income", "value": _fmt_large(_first(m, "netIncome", "net_income")), "locked": False},
+        {"label": "Revenue", "value": _fmt_large(_first(m, "revenue", "sales")), "locked": False},
+        {"label": "Net Income", "value": _fmt_large(_first(m, "netIncome", "net_income", "pat")), "locked": False},
         {"label": "EPS", "value": str(_first(m, "eps", default="—")), "locked": False},
-        {"label": "EPS Growth Forecast", "value": None, "locked": True, "pro": True},
-        {"label": "P/E Ratio", "value": f"{_first(m, 'peRatio', 'pe_ratio', default='—')}x", "locked": False},
-        {"label": "Dividend (Yield)", "value": str(_first(m, "dividendYield", default="—")), "locked": False},
+        {"label": "EPS Growth Forecast", "value": str(_first(m, "eps_growth", "epsGrowth", default="—")), "locked": False},
+        {"label": "P/E Ratio", "value": f"{_first(m, 'peRatio', 'pe_ratio', 'pe_current', default='—')}x", "locked": False},
+        {"label": "Dividend (Yield)", "value": str(_first(m, "dividendYield", "yield_estimate", default="—")), "locked": False},
     ]
     ratio_items = [
         {"label": "Return on Assets", "value": f"{_to_float(_first(m, 'returnOnAssets')):.1f}%", "locked": False},
@@ -292,8 +310,61 @@ def map_statistics(ticker: str, quote: dict, metrics: dict, *, tier: str) -> Com
     return CompanyStatisticsResponse(ticker=ticker.upper(), columns=columns)
 
 
+def _field_value_for_period(fields: list[dict[str, Any]], key: str, period_index: int) -> Any:
+    for field in fields:
+        if not isinstance(field, dict):
+            continue
+        field_key = str(field.get("key") or "").lower()
+        label = str(field.get("label") or "").lower()
+        if field_key == key.lower() or key.lower() in label:
+            values = field.get("values") or []
+            if period_index < len(values):
+                return values[period_index]
+    return None
+
+
+def _period_label(period: dict[str, Any]) -> str:
+    year = str(period.get("year") or "")
+    quarter = str(period.get("quarter") or "")
+    period_end = str(period.get("period_end") or "")
+    if quarter:
+        return f"{year} {quarter}".strip()
+    if year:
+        return year
+    return period_end[:10]
+
+
+def _financial_rows_from_v3(raw: dict[str, Any]) -> list[dict[str, Any]]:
+    periods = raw.get("periods") if isinstance(raw.get("periods"), list) else []
+    fields = raw.get("fields") if isinstance(raw.get("fields"), list) else []
+    rows: list[dict[str, Any]] = []
+    for idx, period in enumerate(periods):
+        if not isinstance(period, dict):
+            continue
+        label = _period_label(period)
+        rows.append(
+            {
+                "period": label,
+                "period_label": label,
+                "revenue": _field_value_for_period(fields, "sales", idx),
+                "net_income": _field_value_for_period(fields, "pat", idx),
+                "gross_profit": _field_value_for_period(fields, "gross_profit", idx),
+                "operating_income": _field_value_for_period(fields, "op_profit", idx),
+                "total_assets": _field_value_for_period(fields, "nc_assets", idx),
+                "total_liabilities": _field_value_for_period(fields, "liabilities", idx),
+                "total_equity": _field_value_for_period(fields, "equity", idx),
+                "operating_cash_flow": _field_value_for_period(fields, "op_cash", idx),
+                "investing_cash_flow": _field_value_for_period(fields, "inv_cash", idx),
+                "financing_cash_flow": _field_value_for_period(fields, "fin_cash", idx),
+                "free_cash_flow": _field_value_for_period(fields, "fcf", idx),
+                "eps": _field_value_for_period(fields, "eps", idx),
+            }
+        )
+    return rows
+
+
 def map_earnings(ticker: str, raw: dict[str, Any]) -> EarningsResponse:
-    rows = _rows_from_list(raw)
+    rows = _financial_rows_from_v3(raw) if isinstance(raw, dict) and raw.get("fields") else _rows_from_list(raw)
     chart: list[EarningsChartPoint] = []
     for row in rows[:8]:
         chart.append(
@@ -326,25 +397,50 @@ def map_dividends(ticker: str, raw: dict[str, Any]) -> DividendResponse:
     rows = _rows_from_list(raw)
     history = [
         DividendHistoryItem(
-            date=str(_first(r, "date", "exDate", default=""))[:10],
-            amount=_to_float(_first(r, "amount", "dividend")),
-            type=str(_first(r, "type", default="regular")),
+            date=str(_first(r, "date", "exDate", "ex_date", default=""))[:10],
+            amount=_to_float(_first(r, "amount", "dividend", "dividend_amount")),
+            type=str(_first(r, "type", "title", default="regular")),
         )
         for r in rows[:20]
     ]
+    latest = rows[0] if rows else {}
     return DividendResponse(
         ticker=ticker.upper(),
         payout_ratio=_to_float(_first(raw, "payoutRatio", "payout_ratio")) or None,
         dividend_yield=str(_first(raw, "dividendYield", "dividend_yield", default="")) or None,
-        annualized_payout=str(_first(raw, "annualizedPayout", default="")) or None,
-        payout_frequency=str(_first(raw, "frequency", default="quarterly")) or None,
+        annualized_payout=str(_first(raw, "annualizedPayout", "dividend", default=_first(latest, "dividend", default=""))) or None,
+        payout_frequency=str(_first(raw, "frequency", default="annual")) or None,
         history=history,
     )
 
 
 def map_ownership(ticker: str, raw: dict[str, Any]) -> OwnershipResponse:
-    breakdown_raw = _rows_from_list(_first(raw, "breakdown", default=raw))
-    holders_raw = _rows_from_list(_first(raw, "topHolders", "top_holders", default=[]))
+    if isinstance(raw, dict) and raw.get("fields"):
+        periods = raw.get("periods") if isinstance(raw.get("periods"), list) else []
+        fields = raw.get("fields") if isinstance(raw.get("fields"), list) else []
+        latest_idx = 0
+        breakdown_raw: list[dict[str, Any]] = []
+        for field in fields:
+            if not isinstance(field, dict) or field.get("is_heading"):
+                continue
+            values = field.get("values") or []
+            if not values:
+                continue
+            pct = values[latest_idx] if latest_idx < len(values) else values[0]
+            breakdown_raw.append(
+                {
+                    "type": field.get("label"),
+                    "percent": f"{_to_float(pct) * 100:.2f}%",
+                    "shares": "—",
+                    "value": "—",
+                }
+            )
+        holders_raw: list[dict[str, Any]] = []
+        total_raw = {"percent": "100.00%"}
+    else:
+        breakdown_raw = _rows_from_list(_first(raw, "breakdown", default=raw))
+        holders_raw = _rows_from_list(_first(raw, "topHolders", "top_holders", default=[]))
+        total_raw = _first(raw, "total", default={}) or {}
     breakdown = [
         OwnershipBreakdownItem(
             type=str(_first(b, "type", "category", default="Unknown")),
@@ -365,7 +461,7 @@ def map_ownership(ticker: str, raw: dict[str, Any]) -> OwnershipResponse:
         )
         for h in holders_raw
     ]
-    total_raw = _first(raw, "total", default={}) or {}
+    total_raw = total_raw if isinstance(total_raw, dict) else {}
     return OwnershipResponse(
         ticker=ticker.upper(),
         total=OwnershipTotal(
@@ -425,7 +521,7 @@ def map_financial_statement(
     statement_type: str,
     period: str,
 ) -> FinancialStatementResponse:
-    rows_raw = _rows_from_list(raw)
+    rows_raw = _financial_rows_from_v3(raw) if isinstance(raw, dict) and raw.get("fields") else _rows_from_list(raw)
     rows: list[FinancialStatementRow] = []
     for row in rows_raw:
         rows.append(
@@ -505,6 +601,55 @@ def map_news(
     )
 
 
+def map_analyst_from_consensus(ticker: str, consensus_raw: dict, price: float, page: int, limit: int) -> AnalystResponse:
+    summary = consensus_raw.get("recommendation_summary") if isinstance(consensus_raw.get("recommendation_summary"), list) else []
+    ratings_raw: list[dict[str, Any]] = []
+    for row in summary:
+        if not isinstance(row, dict):
+            continue
+        ratings_raw.append(
+            {
+                "firm": row.get("company"),
+                "analyst": row.get("analyst"),
+                "position": row.get("action"),
+                "rating": row.get("action"),
+                "price_target": row.get("target"),
+                "date": row.get("date"),
+                "action": row.get("action"),
+            }
+        )
+    dist = (consensus_raw.get("consensus") or {}).get("rating_distribution") or {}
+    if dist and not ratings_raw:
+        ratings_raw = [
+            {"position": "Buy", "rating": "Buy", "firm": "Consensus", "price_target": (consensus_raw.get("price_target") or {}).get("average")},
+        ] * int(dist.get("buy") or 0)
+        ratings_raw += [
+            {"position": "Hold", "rating": "Hold", "firm": "Consensus", "price_target": (consensus_raw.get("price_target") or {}).get("average")},
+        ] * int(dist.get("hold") or 0)
+        ratings_raw += [
+            {"position": "Sell", "rating": "Sell", "firm": "Consensus", "price_target": (consensus_raw.get("price_target") or {}).get("average")},
+        ] * int(dist.get("sell") or 0)
+    return map_analyst(ticker, ratings_raw, page, limit, price)
+
+
+def map_analyst_from_targets(ticker: str, targets_raw: list[dict], price: float, page: int, limit: int) -> AnalystResponse:
+    ratings_raw: list[dict[str, Any]] = []
+    for row in targets_raw:
+        if not isinstance(row, dict):
+            continue
+        ratings_raw.append(
+            {
+                "firm": row.get("sn") or row.get("sc"),
+                "position": row.get("act") or row.get("pos"),
+                "rating": row.get("act") or row.get("pos"),
+                "price_target": row.get("tgt"),
+                "date": row.get("mod") or row.get("crt"),
+                "action": row.get("act"),
+            }
+        )
+    return map_analyst(ticker, ratings_raw, page, limit, price)
+
+
 def map_analyst(ticker: str, ratings_raw: list[dict], page: int, limit: int, price: float) -> AnalystResponse:
     ratings: list[AnalystRating] = []
     buy = hold = sell = 0
@@ -569,6 +714,30 @@ def map_swot(ticker: str, items_raw: list[dict]) -> SwotResponse:
 
 def map_technical(ticker: str, raw: dict, *, tier: str) -> TechnicalAnalysisResponse:
     locked_short = tier == "free"
+    indicators = raw.get("indicators") if isinstance(raw.get("indicators"), list) else []
+    if indicators:
+        overall = "Neutral"
+        for indicator in indicators:
+            name = str(indicator.get("name", "")).lower()
+            values = indicator.get("values") or []
+            if name == "rsi" and values:
+                rsi = _to_float(values[0], 50)
+                overall = "Bullish" if rsi >= 55 else "Bearish" if rsi <= 45 else "Neutral"
+                break
+        return TechnicalAnalysisResponse(
+            ticker=ticker.upper(),
+            snapshot_at=_iso_timestamp(None),
+            overall_signal=overall,
+            timeframes=[
+                TechnicalTimeframe(
+                    id="1d",
+                    label="Daily",
+                    signal=overall,
+                    signal_type="neutral",
+                    locked=False,
+                )
+            ],
+        )
     timeframes_def = [
         ("1m", "1 Min", locked_short),
         ("5m", "5 Min", locked_short),

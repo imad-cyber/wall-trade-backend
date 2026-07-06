@@ -17,6 +17,7 @@ from app.core.memory_cache import get_memory_cache
 from app.domain.market.models import Price
 from app.providers.capital_stake.client import CapitalStakeClient
 from app.providers.capital_stake.extended_mapper import (
+    _map_v3_market_state,
     _rows_from_list,
     compute_opex_dates,
     map_market_summary,
@@ -25,6 +26,7 @@ from app.providers.capital_stake.extended_mapper import (
     map_related,
     validate_ohlcv_params,
 )
+from app.providers.capital_stake.v3_paths import lookback_days_for_range
 from app.providers.psx_proxy.client import PSXProxyClient
 
 QUOTE_CACHE_TTL = 60
@@ -91,7 +93,12 @@ class MarketService:
         cache_key = f"market:ohlcv:{ticker.upper()}:{range_}:{interval}"
 
         async def fetch():
-            raw = self.capital_stake._unwrap_data(await self.capital_stake.get_eod_data(ticker))
+            raw = self.capital_stake._unwrap_data(
+                await self.capital_stake.get_eod_data(
+                    ticker,
+                    lookback_days=lookback_days_for_range(range_),
+                )
+            )
             return map_ohlcv(ticker, raw, range_, interval)
 
         return await self._cached(cache_key, OHLCV_CACHE_TTL, fetch)
@@ -103,14 +110,18 @@ class MarketService:
             profile = self.capital_stake._unwrap_data(
                 await self.capital_stake.get_company_profile_basic(ticker)
             )
-            sector = str(profile.get("sector", "Energy"))
+            sector = str(profile.get("sector", profile.get("sector_code", "0801")))
             peers_raw: list[str] = []
             try:
                 constituents = self.capital_stake._unwrap_data(
                     await self.capital_stake.get_sector_constituents(sector)
                 )
                 if isinstance(constituents, list):
-                    peers_raw = [str(p.get("ticker", p.get("symbol", ""))).upper() for p in constituents if isinstance(p, dict)][:5]
+                    peers_raw = [
+                        str(p.get("ticker", p.get("symbol", p.get("s", "")))).upper()
+                        for p in constituents
+                        if isinstance(p, dict)
+                    ][:5]
             except ExternalServiceError:
                 peers_raw = []
             return map_peers(ticker, sector, peers_raw, [])
@@ -124,7 +135,7 @@ class MarketService:
             profile = self.capital_stake._unwrap_data(
                 await self.capital_stake.get_company_profile_basic(ticker)
             )
-            sector = str(profile.get("sector", "Energy"))
+            sector = str(profile.get("sector", profile.get("sector_code", "0801")))
             items: list[dict[str, Any]] = []
             try:
                 constituents = self.capital_stake._unwrap_data(
@@ -134,7 +145,7 @@ class MarketService:
                     for c in constituents[: limit + 1]:
                         if not isinstance(c, dict):
                             continue
-                        sym = str(c.get("ticker", c.get("symbol", ""))).upper()
+                        sym = str(c.get("ticker", c.get("symbol", c.get("s", "")))).upper()
                         if sym and sym != ticker.upper():
                             try:
                                 q = await self.capital_stake.get_stock_quote(sym)
@@ -175,11 +186,14 @@ class MarketService:
                     await self.capital_stake.get_market_status()
                 )
                 if isinstance(status_raw, dict):
-                    market_status = str(
-                        status_raw.get("status")
-                        or status_raw.get("marketStatus")
-                        or status_raw.get("market_status")
-                        or "Closed"
+                    market_status = _map_v3_market_state(
+                        str(
+                            status_raw.get("state")
+                            or status_raw.get("status")
+                            or status_raw.get("marketStatus")
+                            or status_raw.get("market_status")
+                            or "SUS"
+                        )
                     )
             except ExternalServiceError:
                 pass
@@ -189,7 +203,7 @@ class MarketService:
                 if not isinstance(row, dict):
                     continue
                 symbol = str(
-                    row.get("symbol") or row.get("ticker") or row.get("code") or ""
+                    row.get("symbol") or row.get("ticker") or row.get("code") or row.get("s") or ""
                 ).upper()
                 normalized = symbol.replace("-", "").replace("_", "")
                 if normalized == "KSE100" or "KSE100" in normalized:
@@ -199,7 +213,7 @@ class MarketService:
             chart_points = []
             try:
                 eod_raw = self.capital_stake._unwrap_data(
-                    await self.capital_stake.get_eod_data(featured_symbol)
+                    await self.capital_stake.get_eod_data(featured_symbol, lookback_days=35)
                 )
                 chart_points = map_ohlcv(featured_symbol, eod_raw, "1mo", "1d").points
             except ExternalServiceError:

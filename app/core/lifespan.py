@@ -13,12 +13,21 @@ logger = get_logger(__name__)
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Manage application startup and shutdown."""
+    get_settings.cache_clear()
     settings = get_settings()
     logger.info("Starting %s v%s", settings.APP_NAME, settings.APP_VERSION)
     logger.info("Environment: %s", settings.ENVIRONMENT)
+    logger.info("Capital Stake API base: %s", settings.capital_stake_base_url)
 
     scheduler = None
     http_clients: list = []
+
+    try:
+        from app.core.http import close_http_clients
+
+        await close_http_clients()
+    except Exception:
+        pass
 
     try:
         get_supabase_client()

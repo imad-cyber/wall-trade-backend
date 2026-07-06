@@ -60,8 +60,8 @@ def _iso_timestamp(raw: Any) -> str:
 
 
 def _build_ranges(quote: dict[str, Any], price: float) -> StockRangesSchema:
-    day_low = _to_float(_first(quote, "low", "dayLow", "day_low"), price)
-    day_high = _to_float(_first(quote, "high", "dayHigh", "day_high"), price)
+    day_low = _to_float(_first(quote, "low", "dayLow", "day_low", "lcap"), price)
+    day_high = _to_float(_first(quote, "high", "dayHigh", "day_high", "ucap"), price)
     week_low = _to_float(_first(quote, "fiftyTwoWeekLow", "week52Low", "week_52_low", "low52"), day_low)
     week_high = _to_float(_first(quote, "fiftyTwoWeekHigh", "week52High", "week_52_high", "high52"), day_high)
 
@@ -74,10 +74,10 @@ def _build_ranges(quote: dict[str, Any], price: float) -> StockRangesSchema:
 
 def map_quote_to_stock_data(ticker: str, quote: dict[str, Any], profile: Optional[dict[str, Any]] = None) -> StockDataSchema:
     profile = profile or {}
-    price = _to_float(_first(quote, "lastPrice", "last_price", "price", "close", "ltp"), 0.0)
-    change = _to_float(_first(quote, "change", "netChange", "net_change"), 0.0)
+    price = _to_float(_first(quote, "lastPrice", "last_price", "price", "close", "ltp", "c", "ldcp"), 0.0)
+    change = _to_float(_first(quote, "change", "netChange", "net_change", "ch"), 0.0)
     change_percent = _normalize_change_percent(
-        _first(quote, "changePercent", "change_percent", "pctChange", "pct_change")
+        _first(quote, "changePercent", "change_percent", "pctChange", "pct_change", "pch")
     )
 
     pre_market_raw = _first(quote, "preMarket", "pre_market")
@@ -91,7 +91,7 @@ def map_quote_to_stock_data(ticker: str, quote: dict[str, Any], profile: Optiona
         )
 
     name = (
-        _first(quote, "name", "symbolName", "symbol_name", "companyName", "company_name")
+        _first(quote, "name", "symbolName", "symbol_name", "companyName", "company_name", "s")
         or _first(profile, "name", "companyName", "company_name", "symbolName")
         or ticker
     )
@@ -132,11 +132,12 @@ def map_overview(
 
 
 def map_profile_basic(ticker: str, raw: dict[str, Any]) -> CompanyProfileResponse:
+    sector = _first(raw, "sector", "sectorName", "sector_name", "sector_code")
     return CompanyProfileResponse(
         ticker=ticker.upper(),
         description=_first(raw, "description", "businessSummary", "business_summary"),
         industry=_first(raw, "industry", "industryName", "industry_name"),
-        sector=_first(raw, "sector", "sectorName", "sector_name"),
+        sector=sector,
         employees=str(_first(raw, "employees", "fullTimeEmployees", "full_time_employees", default="")) or None,
         market=str(_first(raw, "market", "exchange", default="PSX") or "PSX"),
         website=_first(raw, "website", "webSite", "web_site"),
