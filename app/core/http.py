@@ -3,7 +3,7 @@ import time
 from typing import Any, Optional
 
 import httpx
-from tenacity import retry, stop_after_attempt, wait_exponential
+from tenacity import retry, retry_if_exception, stop_after_attempt, wait_exponential
 
 from app.core.config import get_settings
 from app.core.logging import get_logger
@@ -13,6 +13,19 @@ from app.observability.metrics import record_external_api_latency
 logger = get_logger(__name__)
 
 _registry: dict[str, "AsyncHTTPClient"] = {}
+
+
+def _is_retryable(exc: BaseException) -> bool:
+    """Return True only for errors that are safe and useful to retry.
+
+    4xx client errors (auth failures, permission errors, not-found, rate
+    limits) must NOT be retried — they require human/config action and
+    retrying them wastes time and quota.  Only retry on transient network
+    problems and 5xx server-side errors.
+    """
+    if isinstance(exc, httpx.HTTPStatusError):
+        return exc.response.status_code >= 500
+    return isinstance(exc, httpx.HTTPError)
 
 
 class AsyncHTTPClient:
@@ -50,33 +63,79 @@ class AsyncHTTPClient:
     async def _request(self, method: str, path: str, **kwargs) -> dict[str, Any]:
         url = path if path.startswith("http") else f"{self.base_url}/{path.lstrip('/')}"
         start = time.perf_counter()
+        ctx = get_ctx()
+        attempt_count = 0
+
+        logger.debug(
+            "→ %s %s provider=%s request_id=%s auth=%s",
+            method,
+            url,
+            self.provider_name,
+            ctx.request_id or "-",
+            "Bearer" if self.api_key else "none",
+        )
 
         @retry(
             stop=stop_after_attempt(self.retries),
             wait=wait_exponential(multiplier=0.5, min=0.5, max=8),
+            retry=retry_if_exception(_is_retryable),
             reraise=True,
         )
         async def _do_request() -> httpx.Response:
+            nonlocal attempt_count
+            attempt_count += 1
+            if attempt_count > 1:
+                logger.debug(
+                    "↻ retry attempt %d/%d %s %s",
+                    attempt_count,
+                    self.retries,
+                    method,
+                    url,
+                )
             response = await self._client.request(method, url, headers=self._headers(), **kwargs)
             response.raise_for_status()
             return response
 
         try:
             response = await _do_request()
+        except httpx.HTTPStatusError as exc:
+            elapsed_ms = (time.perf_counter() - start) * 1000
+            logger.warning(
+                "← %s %s %s -> %d (%.1fms) provider=%s request_id=%s",
+                method,
+                url,
+                exc.response.status_code,
+                exc.response.status_code,
+                elapsed_ms,
+                self.provider_name,
+                ctx.request_id or "-",
+            )
+            raise
         except httpx.HTTPError as exc:
-            logger.error("%s %s failed: %s", method, url, exc)
+            elapsed_ms = (time.perf_counter() - start) * 1000
+            logger.error(
+                "← %s %s NETWORK_ERROR (%.1fms) provider=%s request_id=%s attempts=%d error=%s",
+                method,
+                url,
+                elapsed_ms,
+                self.provider_name,
+                ctx.request_id or "-",
+                attempt_count,
+                exc,
+            )
             raise
 
         elapsed_ms = (time.perf_counter() - start) * 1000
         record_external_api_latency(self.provider_name, elapsed_ms)
-        ctx = get_ctx()
         ctx.provider_latencies[self.provider_name] = elapsed_ms
         logger.info(
-            "HTTP %s %s -> %s (%.1fms)",
+            "← %s %s -> %d (%.1fms) provider=%s request_id=%s",
             method,
             url,
             response.status_code,
             elapsed_ms,
+            self.provider_name,
+            ctx.request_id or "-",
         )
         return response.json()
 

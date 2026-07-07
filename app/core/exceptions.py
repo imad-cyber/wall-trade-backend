@@ -80,9 +80,23 @@ class ConflictError(AppException):
 
 
 class ExternalServiceError(AppException):
-    """Raised when external service calls fail."""
+    """Raised when external service calls fail.
+
+    Error code → HTTP status mapping:
+      SERVICE_UNAVAILABLE  → 503  provider unreachable / token not configured
+      SUBSCRIPTION_ERROR   → 503  caller's plan does not include this endpoint
+      RATE_LIMITED         → 429  upstream rate-limit hit
+      AUTH_ERROR           → 502  our credentials were rejected (config issue)
+      PROVIDER_ERROR       → 502  unexpected provider-side failure
+    """
+
+    _STATUS_MAP: dict[str, int] = {
+        "SERVICE_UNAVAILABLE": 503,
+        "SUBSCRIPTION_ERROR": 503,
+        "RATE_LIMITED": 429,
+    }
 
     def __init__(self, service: str, message: str, error_code: str = "PROVIDER_ERROR"):
         full_message = f"{service} error: {message}"
-        status_code = 503 if error_code == "SERVICE_UNAVAILABLE" else 502
+        status_code = self._STATUS_MAP.get(error_code, 502)
         super().__init__(full_message, status_code=status_code, error_code=error_code)

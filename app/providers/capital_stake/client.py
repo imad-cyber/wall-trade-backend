@@ -212,12 +212,31 @@ class CapitalStakeClient:
             return await self._http.get(path, params=params)
         except httpx.HTTPStatusError as exc:
             failed_url = str(exc.request.url) if exc.request else path
-            if exc.response.status_code == 404:
+            status = exc.response.status_code
+            if status == 404:
                 symbol = (params or {}).get("symbol") or path.split("/")[-1]
                 raise ResourceNotFoundError(f"Ticker {symbol}") from exc
+            if status == 401:
+                raise ExternalServiceError(
+                    "Capital Stake",
+                    "Authentication failed — verify CAPITAL_STAKE_UAT_TOKEN",
+                    error_code="AUTH_ERROR",
+                ) from exc
+            if status == 403:
+                raise ExternalServiceError(
+                    "Capital Stake",
+                    f"Subscription required for endpoint '{path}' — contact Capital Stake to enable this API",
+                    error_code="SUBSCRIPTION_ERROR",
+                ) from exc
+            if status == 429:
+                raise ExternalServiceError(
+                    "Capital Stake",
+                    "Rate limit exceeded — slow down requests or upgrade plan",
+                    error_code="RATE_LIMITED",
+                ) from exc
             raise ExternalServiceError(
                 "Capital Stake",
-                f"Client error '{exc.response.status_code} {exc.response.reason_phrase}' for url '{failed_url}'",
+                f"Provider returned {status} for '{failed_url}'",
                 error_code="PROVIDER_ERROR",
             ) from exc
         except httpx.HTTPError as exc:

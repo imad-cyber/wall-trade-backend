@@ -9,7 +9,7 @@ async def health_checks() -> None:
     settings = get_settings()
     checks = {
         "supabase": bool(settings.SUPABASE_URL and settings.supabase_database_key),
-        "capital_stake": bool(settings.capital_stake_key),
+        "capital_stake": bool(settings.capital_stake_token),
         "psx_proxy": bool(settings.psx_proxy_base_url),
         "ai": bool(settings.ai_api_key),
         "fmp": bool(settings.FMP_API_KEY),
