@@ -1,0 +1,16 @@
+tests/
+venv/
+.venv/
+logs/
+__pycache__/
+*.pyc
+.env
+.env.*
+!.env.example
+.git/
+.github/
+docker-compose.yml
+Makefile
+conftest.py
+test_*.py
+verify_app.py
