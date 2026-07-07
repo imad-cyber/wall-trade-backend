@@ -37,7 +37,10 @@ def _normalize_change_percent(value: Any) -> float:
 
 
 def _normalize_status(raw_status: Any) -> str:
-    if not raw_status:
+    if raw_status is None:
+        return "Closed"
+    if isinstance(raw_status, (int, float)):
+        # csapis v3 uses numeric listing flags; market open/close comes from /market/state.
         return "Closed"
     status = str(raw_status).strip().lower()
     mapping = {
@@ -49,6 +52,10 @@ def _normalize_status(raw_status: Any) -> str:
         "after-hours": "After-Hours",
         "afterhours": "After-Hours",
         "after_hours": "After-Hours",
+        "opn": "Open",
+        "sus": "Closed",
+        "hlt": "Closed",
+        "pcl": "After-Hours",
     }
     return mapping.get(status, "Closed")
 
@@ -62,8 +69,14 @@ def _iso_timestamp(raw: Any) -> str:
 def _build_ranges(quote: dict[str, Any], price: float) -> StockRangesSchema:
     day_low = _to_float(_first(quote, "low", "dayLow", "day_low", "lcap"), price)
     day_high = _to_float(_first(quote, "high", "dayHigh", "day_high", "ucap"), price)
-    week_low = _to_float(_first(quote, "fiftyTwoWeekLow", "week52Low", "week_52_low", "low52"), day_low)
-    week_high = _to_float(_first(quote, "fiftyTwoWeekHigh", "week52High", "week_52_high", "high52"), day_high)
+    week_low = _to_float(
+        _first(quote, "fiftyTwoWeekLow", "week52Low", "week_52_low", "low52", "low52"),
+        day_low,
+    )
+    week_high = _to_float(
+        _first(quote, "fiftyTwoWeekHigh", "week52High", "week_52_high", "high52", "high52"),
+        day_high,
+    )
 
     return StockRangesSchema(
         fair_value=None,
@@ -74,7 +87,10 @@ def _build_ranges(quote: dict[str, Any], price: float) -> StockRangesSchema:
 
 def map_quote_to_stock_data(ticker: str, quote: dict[str, Any], profile: Optional[dict[str, Any]] = None) -> StockDataSchema:
     profile = profile or {}
-    price = _to_float(_first(quote, "lastPrice", "last_price", "price", "close", "ltp", "c", "ldcp"), 0.0)
+    price = _to_float(
+        _first(quote, "lastPrice", "last_price", "price", "close", "ltp", "c", "ldcp"),
+        0.0,
+    )
     change = _to_float(_first(quote, "change", "netChange", "net_change", "ch"), 0.0)
     change_percent = _normalize_change_percent(
         _first(quote, "changePercent", "change_percent", "pctChange", "pct_change", "pch")
@@ -91,7 +107,7 @@ def map_quote_to_stock_data(ticker: str, quote: dict[str, Any], profile: Optiona
         )
 
     name = (
-        _first(quote, "name", "symbolName", "symbol_name", "companyName", "company_name", "s")
+        _first(quote, "name", "symbolName", "symbol_name", "companyName", "company_name", "s", "symbol")
         or _first(profile, "name", "companyName", "company_name", "symbolName")
         or ticker
     )

@@ -3,6 +3,7 @@ from app.api.v1.schemas.search import SearchResult, SymbolSearchResponse
 from app.core.memory_cache import get_memory_cache
 from app.providers.capital_stake.client import CapitalStakeClient
 from app.providers.capital_stake.extended_mapper import _rows_from_list
+from app.providers.capital_stake.psx_symbols import fallback_symbol_rows
 from app.repositories.symbol_repository import SymbolRepository
 
 _symbol_cache: list[dict] = []
@@ -34,6 +35,8 @@ class SearchService:
                 items = self.symbol_repo.list(limit=5000)
             except Exception:
                 items = []
+        if not items:
+            items = fallback_symbol_rows()
 
         _symbol_cache = items
         self._cache.set("search:universe", items, 86400)
@@ -47,7 +50,9 @@ class SearchService:
         universe = await self._get_universe()
         results: list[SearchResult] = []
         for item in universe:
-            ticker = str(item.get("ticker", item.get("symbol", item.get("s", "")))).upper()
+            ticker = str(
+                item.get("ticker", item.get("symbol", item.get("s", item.get("code", ""))))
+            ).upper()
             if item.get("m") == "IDX":
                 continue
             name = str(item.get("name", item.get("companyName", ticker)))

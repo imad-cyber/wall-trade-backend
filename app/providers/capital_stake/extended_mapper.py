@@ -131,8 +131,11 @@ FEATURED_INDEX_SYMBOLS = frozenset({"KSE100", "KSE-100", "KSE_100"})
 
 def _map_index_row(row: dict[str, Any]) -> MarketSummaryIndex:
     symbol = str(_first(row, "symbol", "ticker", "code", "s", default="")).upper()
-    name = str(_first(row, "name", "indexName", "index_name", "title", "s", default=symbol or "Index"))
-    price = _to_float(_first(row, "lastPrice", "last_price", "price", "close", "value", "c"), 0.0)
+    name = str(_first(row, "name", "indexName", "index_name", "title", "code", "s", default=symbol or "Index"))
+    price = _to_float(
+        _first(row, "lastPrice", "last_price", "price", "close", "value", "c", "ldcp", "ldci"),
+        0.0,
+    )
     change_percent = _normalize_change_percent(
         _first(row, "changePercent", "change_percent", "pctChange", "pct_change", "pch", "change")
     )

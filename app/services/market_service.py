@@ -203,7 +203,11 @@ class MarketService:
                 if not isinstance(row, dict):
                     continue
                 symbol = str(
-                    row.get("symbol") or row.get("ticker") or row.get("code") or row.get("s") or ""
+                    row.get("symbol")
+                    or row.get("ticker")
+                    or row.get("code")
+                    or row.get("s")
+                    or ""
                 ).upper()
                 normalized = symbol.replace("-", "").replace("_", "")
                 if normalized == "KSE100" or "KSE100" in normalized:

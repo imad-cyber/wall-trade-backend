@@ -40,9 +40,8 @@ async def test_capital_stake_get_stock_quote():
 
 
 @pytest.mark.asyncio
-async def test_capital_stake_collection_404_raises_provider_error_not_ticker():
+async def test_get_all_tickers_uses_fallback_when_collection_missing():
     def handler(request: httpx.Request) -> httpx.Response:
-        assert request.url.path.endswith("/market/tickers")
         return httpx.Response(404, json={"status": "error", "message": "not found"})
 
     transport = httpx.MockTransport(handler)
@@ -50,12 +49,10 @@ async def test_capital_stake_collection_404_raises_provider_error_not_ticker():
     http._client = httpx.AsyncClient(transport=transport, base_url="https://uat.csapis.com/3.0")
     client = CapitalStakeClient(http=http)
 
-    from app.core.exceptions import ExternalServiceError
-
-    with pytest.raises(ExternalServiceError) as exc_info:
-        await client.get_indices()
-    assert "Endpoint not found" in str(exc_info.value)
-    assert "Ticker tickers" not in str(exc_info.value)
+    tickers = await client.get_all_tickers()
+    rows = client._unwrap_data(tickers)
+    assert len(rows) > 0
+    assert any(str(row.get("ticker", "")).upper() == "OGDC" for row in rows)
     await http.aclose()
 
 
@@ -100,8 +97,72 @@ async def test_company_overview_survives_tickers_404():
 
 
 @pytest.mark.asyncio
+async def test_capital_stake_get_single_quote_list_response():
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "status": "ok",
+                "data": [
+                    {
+                        "symbol": "OGDC",
+                        "name": "Oil & Gas Development Company Limited",
+                        "ldcp": 348.72,
+                        "ucap": 383.59,
+                        "lcap": 313.85,
+                        "high52": 352,
+                        "low52": 220.99,
+                    }
+                ],
+            },
+        )
+
+    transport = httpx.MockTransport(handler)
+    http = AsyncHTTPClient("https://uat.csapis.com/3.0", provider_name="capital_stake")
+    http._client = httpx.AsyncClient(transport=transport, base_url="https://uat.csapis.com/3.0")
+    client = CapitalStakeClient(http=http)
+    stock = await client.get_stock_quote("OGDC")
+    assert stock.ticker == "OGDC"
+    assert stock.price == 348.72
+    assert stock.ranges.day_range.high == 383.59
+    assert stock.ranges.week_52.low == 220.99
+    await http.aclose()
+
+
+@pytest.mark.asyncio
+async def test_capital_stake_get_indices_falls_back_to_index_quotes():
+    calls: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls.append(request.url.path)
+        if request.url.path.endswith("/market/tickers"):
+            return httpx.Response(404, json={"status": "error"})
+        if request.url.path.endswith("/market/stock"):
+            symbol = request.url.params.get("symbol")
+            if symbol == "KSE100":
+                return httpx.Response(
+                    200,
+                    json={"status": "ok", "data": [{"symbol": "KSE100", "ldcp": 82000, "pch": 0.12}]},
+                )
+            return httpx.Response(404, json={"status": "error"})
+        return httpx.Response(404, json={"status": "error"})
+
+    transport = httpx.MockTransport(handler)
+    http = AsyncHTTPClient("https://uat.csapis.com/3.0", provider_name="capital_stake")
+    http._client = httpx.AsyncClient(transport=transport, base_url="https://uat.csapis.com/3.0")
+    client = CapitalStakeClient(http=http)
+    indices = await client.get_indices()
+    rows = client._unwrap_data(indices)
+    assert len(rows) >= 1
+    assert rows[0]["symbol"] == "KSE100"
+    await http.aclose()
+
+
+@pytest.mark.asyncio
 async def test_capital_stake_get_indices_filters_idx_rows():
     def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("/market/indices"):
+            return httpx.Response(404, json={"status": "error"})
         assert request.url.path.endswith("/market/tickers")
         return httpx.Response(
             200,
@@ -143,6 +204,25 @@ async def test_psx_proxy_get_all_prices():
 def test_company_mapper_legacy():
     profile = CompanyMapper.to_domain("ENGRO", {"companyName": "Engro"})
     assert profile.name == "Engro"
+
+
+def test_map_quote_to_stock_data_ldcp():
+    stock = map_quote_to_stock_data(
+        "OGDC",
+        {
+            "symbol": "OGDC",
+            "name": "Oil & Gas Development Company Limited",
+            "ldcp": 348.72,
+            "ucap": 383.59,
+            "lcap": 313.85,
+            "high52": 352,
+            "low52": 220.99,
+        },
+    )
+    assert stock.ticker == "OGDC"
+    assert stock.price == 348.72
+    assert stock.ranges.day_range.high == 383.59
+    assert stock.ranges.week_52.low == 220.99
 
 
 def test_map_quote_to_stock_data():

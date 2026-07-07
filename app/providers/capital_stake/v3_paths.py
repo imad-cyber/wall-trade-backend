@@ -1,5 +1,13 @@
 """Capital Stake API v3 path helpers."""
 
+# csapis path variants — subscription/plan may expose only a subset.
+TICKER_LIST_PATHS: tuple[str, ...] = (
+    "/market/indices",
+    "/market/tickers",
+    "/indices",
+    "/tickers",
+)
+
 STATEMENT_API_SLUG = {
     "income": "income",
     "balance-sheet": "balance",
