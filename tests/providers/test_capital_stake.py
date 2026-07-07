@@ -40,6 +40,66 @@ async def test_capital_stake_get_stock_quote():
 
 
 @pytest.mark.asyncio
+async def test_capital_stake_collection_404_raises_provider_error_not_ticker():
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path.endswith("/market/tickers")
+        return httpx.Response(404, json={"status": "error", "message": "not found"})
+
+    transport = httpx.MockTransport(handler)
+    http = AsyncHTTPClient("https://uat.csapis.com/3.0", provider_name="capital_stake")
+    http._client = httpx.AsyncClient(transport=transport, base_url="https://uat.csapis.com/3.0")
+    client = CapitalStakeClient(http=http)
+
+    from app.core.exceptions import ExternalServiceError
+
+    with pytest.raises(ExternalServiceError) as exc_info:
+        await client.get_indices()
+    assert "Endpoint not found" in str(exc_info.value)
+    assert "Ticker tickers" not in str(exc_info.value)
+    await http.aclose()
+
+
+@pytest.mark.asyncio
+async def test_capital_stake_stock_404_raises_ticker_not_found():
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(404, json={"status": "error"})
+
+    transport = httpx.MockTransport(handler)
+    http = AsyncHTTPClient("https://uat.csapis.com/3.0", provider_name="capital_stake")
+    http._client = httpx.AsyncClient(transport=transport, base_url="https://uat.csapis.com/3.0")
+    client = CapitalStakeClient(http=http)
+
+    from app.core.exceptions import ResourceNotFoundError
+
+    with pytest.raises(ResourceNotFoundError) as exc_info:
+        await client.get_single_quote("FAKE")
+    assert "Ticker FAKE" in str(exc_info.value)
+    await http.aclose()
+
+
+@pytest.mark.asyncio
+async def test_company_overview_survives_tickers_404():
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("/market/stock"):
+            return httpx.Response(
+                200,
+                json={"status": "ok", "data": {"s": "OGDC", "c": 250.5, "ch": 1.2, "pch": 0.5}},
+            )
+        if request.url.path.endswith("/market/tickers"):
+            return httpx.Response(404, json={"status": "error"})
+        return httpx.Response(404)
+
+    transport = httpx.MockTransport(handler)
+    http = AsyncHTTPClient("https://uat.csapis.com/3.0", provider_name="capital_stake")
+    http._client = httpx.AsyncClient(transport=transport, base_url="https://uat.csapis.com/3.0")
+    client = CapitalStakeClient(http=http)
+    overview = await client.get_company_overview("OGDC")
+    assert overview.ticker == "OGDC"
+    assert overview.price == 250.5
+    await http.aclose()
+
+
+@pytest.mark.asyncio
 async def test_capital_stake_get_indices_filters_idx_rows():
     def handler(request: httpx.Request) -> httpx.Response:
         assert request.url.path.endswith("/market/tickers")

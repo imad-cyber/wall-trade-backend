@@ -61,7 +61,8 @@ class AsyncHTTPClient:
         return headers
 
     async def _request(self, method: str, path: str, **kwargs) -> dict[str, Any]:
-        url = path if path.startswith("http") else f"{self.base_url}/{path.lstrip('/')}"
+        request_path = path if path.startswith("http") else f"/{path.lstrip('/')}"
+        url = request_path if request_path.startswith("http") else f"{self.base_url}{request_path}"
         start = time.perf_counter()
         ctx = get_ctx()
         attempt_count = 0
@@ -92,7 +93,9 @@ class AsyncHTTPClient:
                     method,
                     url,
                 )
-            response = await self._client.request(method, url, headers=self._headers(), **kwargs)
+            response = await self._client.request(
+                method, request_path, headers=self._headers(), **kwargs,
+            )
             response.raise_for_status()
             return response
 

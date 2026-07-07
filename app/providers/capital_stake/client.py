@@ -154,10 +154,8 @@ class CapitalStakeClient:
         for path in ("/market/sectors/stocks", "/market/sector/stocks"):
             try:
                 return await self._get_json(path, params={"sector_code": sector})
-            except ExternalServiceError as exc:
-                if "404" in str(exc):
-                    continue
-                raise
+            except ExternalServiceError:
+                continue
         return {"status": "ok", "data": []}
 
     async def get_technicals(self, ticker: str, interval: str = "1d") -> dict[str, Any]:
@@ -181,6 +179,7 @@ class CapitalStakeClient:
         return "0801"
 
     async def _merge_live_ticker(self, ticker: str, quote_raw: dict[str, Any]) -> dict[str, Any]:
+        """Enrich quote with live ticker row when available; never fail the caller."""
         try:
             tickers = self._unwrap_data(await self.get_all_tickers())
             if isinstance(tickers, list):
@@ -192,7 +191,7 @@ class CapitalStakeClient:
                         and row.get("m") == "REG"
                     ):
                         return {**quote_raw, **row}
-        except ExternalServiceError:
+        except (ExternalServiceError, ResourceNotFoundError):
             pass
         return quote_raw
 
@@ -214,8 +213,14 @@ class CapitalStakeClient:
             failed_url = str(exc.request.url) if exc.request else path
             status = exc.response.status_code
             if status == 404:
-                symbol = (params or {}).get("symbol") or path.split("/")[-1]
-                raise ResourceNotFoundError(f"Ticker {symbol}") from exc
+                symbol = (params or {}).get("symbol")
+                if symbol:
+                    raise ResourceNotFoundError(f"Ticker {symbol}") from exc
+                raise ExternalServiceError(
+                    "Capital Stake",
+                    f"Endpoint not found: '{path}'",
+                    error_code="PROVIDER_ERROR",
+                ) from exc
             if status == 401:
                 raise ExternalServiceError(
                     "Capital Stake",
