@@ -40,7 +40,11 @@ async def get_optional_user(
     """Return authenticated user payload or None for public/tiered routes."""
     if credentials is None:
         return None
-    return validate_supabase_token(credentials, settings, optional=False)
+    try:
+        return validate_supabase_token(credentials, settings, optional=False)
+    except AuthenticationError:
+        # Invalid/expired token on optional routes → treat as anonymous
+        return None
 
 
 async def get_current_supabase_user(
@@ -48,7 +52,8 @@ async def get_current_supabase_user(
     settings: Settings = Depends(get_settings),
 ) -> dict:
     """Validate Supabase JWT for protected Wall-Trade endpoints."""
-    if not settings.SUPABASE_JWT_SECRET:
+    has_auth_config = bool(settings.SUPABASE_JWT_SECRET or settings.SUPABASE_URL)
+    if not has_auth_config:
         if settings.is_development:
             return {"user_id": "development", "role": "authenticated"}
         raise AuthenticationError(

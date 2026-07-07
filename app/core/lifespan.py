@@ -18,6 +18,15 @@ async def lifespan(app: FastAPI):
     logger.info("Starting %s v%s", settings.APP_NAME, settings.APP_VERSION)
     logger.info("Environment: %s", settings.ENVIRONMENT)
     logger.info("Capital Stake API base: %s", settings.capital_stake_base_url)
+    if settings.SUPABASE_JWT_SECRET:
+        logger.info("Supabase JWT validation: HS256 secret configured")
+    elif settings.SUPABASE_URL:
+        logger.info(
+            "Supabase JWT validation: JWKS (asymmetric) via %s",
+            settings.SUPABASE_URL.rstrip("/") + "/auth/v1/.well-known/jwks.json",
+        )
+    else:
+        logger.warning("Supabase JWT validation: not configured")
 
     scheduler = None
     http_clients: list = []

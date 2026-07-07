@@ -1,10 +1,12 @@
 """Auth unit tests."""
 from datetime import timedelta
+from unittest.mock import patch
 
 import pytest
 from fastapi import HTTPException
 from jose import jwt
 
+from app.auth.dependencies import get_optional_user
 from app.auth.jwt import AuthService
 from app.auth.supabase_auth import validate_supabase_token
 from app.core.config import Settings
@@ -67,3 +69,40 @@ class TestSupabaseAuth:
         with pytest.raises(AuthenticationError) as exc:
             validate_supabase_token(creds, settings)
         assert exc.value.error_code == "TOKEN_INVALID"
+
+    def test_hs256_valid_token(self):
+        settings = Settings(
+            SUPABASE_JWT_SECRET="test-secret",
+            ENVIRONMENT="production",
+        )
+        token = jwt.encode({"sub": "user-123"}, "test-secret", algorithm="HS256")
+        creds = type("Creds", (), {"credentials": token})()
+        result = validate_supabase_token(creds, settings)
+        assert result["user_id"] == "user-123"
+
+    def test_jwks_path_used_for_es256_header(self):
+        settings = Settings(
+            SUPABASE_URL="https://example.supabase.co",
+            ENVIRONMENT="production",
+        )
+        token = jwt.encode(
+            {"sub": "user-456"},
+            "wrong-secret",
+            algorithm="HS256",
+            headers={"alg": "ES256", "kid": "test-kid"},
+        )
+        creds = type("Creds", (), {"credentials": token})()
+        with patch("app.auth.supabase_auth._decode_jwks") as mock_jwks:
+            mock_jwks.return_value = {"sub": "user-456"}
+            result = validate_supabase_token(creds, settings)
+        assert result["user_id"] == "user-456"
+        mock_jwks.assert_called_once()
+
+
+class TestOptionalUserDependency:
+    @pytest.mark.asyncio
+    async def test_invalid_token_returns_none(self):
+        settings = Settings(SUPABASE_JWT_SECRET="secret", ENVIRONMENT="production")
+        creds = type("Creds", (), {"credentials": "bad.token", "scheme": "Bearer"})()
+        result = await get_optional_user(credentials=creds, settings=settings)
+        assert result is None

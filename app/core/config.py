@@ -100,8 +100,8 @@ class Settings(BaseSettings):
     def validate_production_secrets(self) -> "Settings":
         if self.is_production:
             missing: list[str] = []
-            if not self.SUPABASE_JWT_SECRET:
-                missing.append("SUPABASE_JWT_SECRET")
+            if not self.SUPABASE_JWT_SECRET and not self.SUPABASE_URL:
+                missing.append("SUPABASE_JWT_SECRET or SUPABASE_URL (for JWKS)")
             if not self.supabase_database_key:
                 missing.append("SUPABASE_SERVICE_ROLE_KEY")
             if not self.capital_stake_token:
