@@ -30,14 +30,31 @@ class CapitalStakeClient:
         return bool(get_settings().capital_stake_token)
 
     async def get_single_quote(self, ticker: str) -> dict[str, Any]:
-        raw = await self._get_json("/market/stock", params={"symbol": ticker.upper()})
-        row = self._normalize_row(self._unwrap_data(raw))
-        return {"status": raw.get("status", "ok"), "data": row}
+        """Single Quote (#4) — /market/quote; falls back to Single Symbol Overview (#2) — /market/stock."""
+        upper = ticker.upper()
+        for path in ("/market/quote", "/market/stock"):
+            try:
+                raw = await self._get_json(path, params={"symbol": upper})
+                row = self._normalize_row(self._unwrap_data(raw))
+                if row:
+                    return {"status": raw.get("status", "ok"), "data": row}
+            except (ExternalServiceError, ResourceNotFoundError):
+                continue
+        return {"status": "ok", "data": {}}
 
     async def get_symbol_overview(self, ticker: str) -> dict[str, Any]:
         return await self.get_single_quote(ticker)
 
     async def get_company_profile_basic(self, ticker: str) -> dict[str, Any]:
+        """Company Profile Basic (#16) — /company/profile/overview; falls back to single quote."""
+        upper = ticker.upper()
+        try:
+            raw = await self._get_json("/company/profile/overview", params={"symbol": upper})
+            row = self._normalize_row(self._unwrap_data(raw))
+            if row:
+                return {"status": raw.get("status", "ok"), "data": row}
+        except (ExternalServiceError, ResourceNotFoundError):
+            pass
         return await self.get_single_quote(ticker)
 
     async def get_stock_quote(self, ticker: str) -> StockDataSchema:
@@ -67,6 +84,10 @@ class CapitalStakeClient:
         statement_type: str,
         period: str,
     ) -> dict[str, Any]:
+        """Key Metrics — Annual (#14) or Quarterly (#15).
+        Full income/balance/cashflow statements are not in the subscribed plan;
+        key-metrics data is returned for all statement_type values.
+        """
         path = financial_statement_path(statement_type, period)
         return await self._get_json(path, params={"symbol": ticker.upper()})
 
@@ -84,11 +105,12 @@ class CapitalStakeClient:
         to_date: str | None = None,
         lookback_days: int = 30,
     ) -> dict[str, Any]:
+        """EOD Unadjusted (#8) — /market/eod with date_from / date_to params."""
         end = to_date or date.today().isoformat()
         start = from_date or (date.today() - timedelta(days=lookback_days)).isoformat()
         return await self._get_json(
-            "/market/eod-adj",
-            params={"symbol": ticker.upper(), "from": start, "to": end},
+            "/market/eod",
+            params={"symbol": ticker.upper(), "date_from": start, "date_to": end},
         )
 
     async def get_eod_for_range(self, ticker: str, range_: str = "2y") -> dict[str, Any]:
@@ -144,12 +166,26 @@ class CapitalStakeClient:
         return {"status": "ok", "data": []}
 
     async def get_index(self, index_id: str) -> dict[str, Any]:
+        """Single Index Overview (#7) — /market/index?code=<code>."""
+        upper = index_id.upper()
+        try:
+            raw = await self._get_json("/market/index", params={"code": upper})
+            row = self._normalize_row(self._unwrap_data(raw))
+            if row:
+                return {"status": raw.get("status", "ok"), "data": row}
+        except (ExternalServiceError, ResourceNotFoundError):
+            pass
+        # Fallback: scan indices list
         raw = await self.get_indices()
         indices = self._unwrap_data(raw)
         if isinstance(indices, list):
-            target = index_id.upper()
             for row in indices:
-                if isinstance(row, dict) and str(row.get("s", "")).upper() == target:
+                if not isinstance(row, dict):
+                    continue
+                symbol = str(
+                    row.get("code") or row.get("s") or row.get("symbol") or ""
+                ).upper()
+                if symbol == upper:
                     return {"status": "ok", "data": row}
         raise ResourceNotFoundError(f"Index {index_id}")
 
@@ -160,14 +196,21 @@ class CapitalStakeClient:
         return await self.get_market_status()
 
     async def get_sector_constituents(self, sector: str) -> dict[str, Any]:
-        for path in ("/market/sectors/stocks", "/market/sector/stocks"):
-            try:
-                return await self._get_json(path, params={"sector_code": sector})
-            except ExternalServiceError:
-                continue
-        return {"status": "ok", "data": []}
+        """Return stocks in a given sector by filtering the All Stocks (#3) response."""
+        try:
+            raw = await self._get_json("/market/stocks")
+            rows = self._rows_from_payload(self._unwrap_data(raw))
+            sector_upper = str(sector).upper()
+            filtered = [
+                row for row in rows
+                if isinstance(row, dict) and str(row.get("sector", "")).upper() == sector_upper
+            ]
+            return {"status": "ok", "data": filtered}
+        except ExternalServiceError:
+            return {"status": "ok", "data": []}
 
     async def get_technicals(self, ticker: str, interval: str = "1d") -> dict[str, Any]:
+        """Technicals by Symbols (#20) — /market/technicals (symbol + interval required)."""
         return await self._get_json(
             "/market/technicals",
             params={"symbol": ticker.upper(), "interval": interval},
