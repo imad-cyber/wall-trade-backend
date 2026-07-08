@@ -48,6 +48,12 @@ class CompanyOverviewResponse(StockDataSchema):
     scorecard: ScorecardSchema = Field(default_factory=ScorecardSchema)
 
 
+class CompanyExecutiveItem(BaseModel):
+    name: str
+    title: str
+    since: Optional[str] = None
+
+
 class CompanyProfileResponse(BaseModel):
     ticker: str
     description: Optional[str] = None
@@ -59,6 +65,9 @@ class CompanyProfileResponse(BaseModel):
     founded_year: Optional[int] = None
     headquarters: Optional[str] = None
     ceo: Optional[str] = None
+    phone: Optional[str] = None
+    email: Optional[str] = None
+    executives: list[CompanyExecutiveItem] = Field(default_factory=list)
 
 
 class StatItem(BaseModel):
@@ -171,3 +180,19 @@ class FaqItem(BaseModel):
 class FaqResponse(BaseModel):
     ticker: str
     items: list[FaqItem] = Field(default_factory=list)
+
+
+class IndexComponentItem(BaseModel):
+    index_code: str
+    index_name: str
+    last: float = 0.0
+    high: Optional[float] = None
+    low: Optional[float] = None
+    change: Optional[float] = None
+    change_percent: Optional[float] = None
+    time: Optional[str] = None
+
+
+class IndexComponentResponse(BaseModel):
+    ticker: str
+    components: list[IndexComponentItem] = Field(default_factory=list)

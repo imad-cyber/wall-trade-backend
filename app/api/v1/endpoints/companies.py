@@ -1,5 +1,5 @@
 """Company profile and metrics endpoints — C1 through C8."""
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Depends, Query, status
 
 from app.api.v1.dependencies import get_company_service
 from app.api.v1.schemas.envelope import make_response
@@ -137,6 +137,42 @@ async def get_company_faq(
     return make_response(
         faq.model_dump(mode="json"),
         cache_hit=cache_hit,
+        cache_age_seconds=cache_age if cache_hit else None,
+    )
+
+
+@router.get("/companies/{ticker}/historical", status_code=status.HTTP_200_OK)
+async def get_company_historical(
+    ticker: str = TickerPath(),
+    range_: str = Query("1y", alias="range"),
+    interval: str = Query("1d"),
+    service: CompanyService = Depends(get_company_service),
+    user=Depends(get_optional_user),
+):
+    """Historical OHLCV with change_percent computation."""
+    normalized = validate_ticker(ticker)
+    historical, cache_hit, cache_age = await service.get_historical(normalized, range_, interval)
+    return make_response(
+        historical.model_dump(mode="json"),
+        cache_hit=cache_hit,
+        provider="capital_stake",
+        cache_age_seconds=cache_age if cache_hit else None,
+    )
+
+
+@router.get("/companies/{ticker}/index-components", status_code=status.HTTP_200_OK)
+async def get_company_index_components(
+    ticker: str = TickerPath(),
+    service: CompanyService = Depends(get_company_service),
+    user=Depends(get_optional_user),
+):
+    """Indices that include this ticker."""
+    normalized = validate_ticker(ticker)
+    components, cache_hit, cache_age = await service.get_index_components(normalized)
+    return make_response(
+        components.model_dump(mode="json"),
+        cache_hit=cache_hit,
+        provider="capital_stake",
         cache_age_seconds=cache_age if cache_hit else None,
     )
 

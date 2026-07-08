@@ -23,6 +23,7 @@ from app.api.v1.schemas.company import (
     EarningsSummary,
     FaqItem,
     FaqResponse,
+    IndexComponentItem,
     OwnershipBreakdownItem,
     OwnershipResponse,
     OwnershipTotal,
@@ -32,6 +33,7 @@ from app.api.v1.schemas.company import (
     StatItem,
     TopHolder,
 )
+from app.api.v1.schemas.historical import HistoricalDataResponse, HistoricalRow
 from app.api.v1.schemas.financials import FinancialStatementResponse, FinancialStatementRow
 from app.api.v1.schemas.market import (
     MarketSummaryChartPoint,
@@ -410,10 +412,12 @@ def map_statistics(ticker: str, quote: dict, metrics: dict, *, tier: str) -> Com
     trading_items = [
         {"label": "Prev. Close", "value": str(_first(q, "previousClose", "prevClose", "ldcp", default=price)), "locked": False},
         {"label": "Open", "value": str(_first(q, "open", default="—")), "locked": False},
-        {"label": "Day's Range", "value": f"{_first(q, 'low', 'lcap', default='—')} - {_first(q, 'high', 'ucap', default='—')}", "locked": False},
-        {"label": "52 wk Range", "value": f"{_first(q, 'fiftyTwoWeekLow', 'low52', default='—')} - {_first(q, 'fiftyTwoWeekHigh', 'high52', default='—')}", "locked": False},
-        {"label": "Volume", "value": _fmt_large(_first(q, "volume", "ldcv")), "locked": False},
-        {"label": "Market Cap", "value": _fmt_large(_first(q, "marketCap", "market_cap")), "locked": False},
+        {"label": "Day's Range", "value": f"{_first(q, 'lcap', 'low', default='—')} - {_first(q, 'ucap', 'high', default='—')}", "locked": False},
+        {"label": "52 wk Range", "value": f"{_first(q, 'low52', 'fiftyTwoWeekLow', default='—')} - {_first(q, 'high52', 'fiftyTwoWeekHigh', default='—')}", "locked": False},
+        {"label": "Volume", "value": _fmt_large(_first(q, "ldcv", "volume")), "locked": False},
+        {"label": "Market Cap", "value": _fmt_large(_first(q, "market_cap", "marketCap")), "locked": False},
+        {"label": "Shares Outstanding", "value": _fmt_large(_first(q, "shares")), "locked": False},
+        {"label": "Free Float", "value": _fmt_large(_first(q, "free_float")), "locked": False},
         {"label": "Fair Value", "value": None, "locked": True, "pro": True},
         {"label": "Fair Value Upside", "value": None, "locked": True, "pro": True},
     ]
@@ -621,6 +625,54 @@ def map_ownership(ticker: str, raw: dict[str, Any]) -> OwnershipResponse:
         ),
         breakdown=breakdown,
         top_holders=top_holders,
+    )
+
+
+def map_historical(ticker: str, ohlcv: OHLCVResponse) -> HistoricalDataResponse:
+    rows: list[HistoricalRow] = []
+    points = sorted(ohlcv.points, key=lambda p: p.date, reverse=True)
+    for i, point in enumerate(points):
+        prev = points[i + 1] if i + 1 < len(points) else None
+        change_pct = None
+        if prev and prev.close:
+            change_pct = round((point.close - prev.close) / prev.close * 100, 2)
+        rows.append(
+            HistoricalRow(
+                date=point.date,
+                open=point.open,
+                high=point.high,
+                low=point.low,
+                close=point.close,
+                volume=point.volume,
+                change_percent=change_pct,
+            )
+        )
+    return HistoricalDataResponse(
+        ticker=ticker.upper(),
+        range=ohlcv.range,
+        interval=ohlcv.interval,
+        rows=rows,
+        total=len(rows),
+    )
+
+
+def map_index_component(code: str, raw: dict[str, Any]) -> IndexComponentItem:
+    name = str(_first(raw, "name", "indexName", "index_name", "title", "code", default=code))
+    last = _to_float(_first(raw, "lastPrice", "last_price", "close", "value", "c", "ldci", "ldcp"), 0)
+    high = _to_float(_first(raw, "high", "dayHigh", "day_high")) or None
+    low = _to_float(_first(raw, "low", "dayLow", "day_low")) or None
+    change = _to_float(_first(raw, "change", "netChange")) or None
+    change_pct = _normalize_change_percent(_first(raw, "changePercent", "change_percent", "pctChange", "pch")) or None
+    time_ = str(_first(raw, "date", "timestamp", "time", default="")) or None
+    return IndexComponentItem(
+        index_code=code.upper(),
+        index_name=name,
+        last=last,
+        high=high,
+        low=low,
+        change=change,
+        change_percent=change_pct,
+        time=time_,
     )
 
 

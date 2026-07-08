@@ -8,22 +8,27 @@ from app.api.v1.schemas.company import (
     DividendResponse,
     EarningsResponse,
     FaqResponse,
+    IndexComponentResponse,
     OwnershipResponse,
     PeriodReturnsResponse,
 )
+from app.api.v1.schemas.historical import HistoricalDataResponse
 from app.core.config import get_settings
-from app.core.exceptions import ExternalServiceError
+from app.core.exceptions import ExternalServiceError, ResourceNotFoundError
 from app.core.memory_cache import get_memory_cache
 from app.domain.company.models import CompanyProfile
 from app.providers.capital_stake.client import CapitalStakeClient
-from app.providers.capital_stake.mapper import _to_float
+from app.providers.capital_stake.mapper import _first, _to_float
 from app.providers.capital_stake.extended_mapper import (
     _extract_key_metric,
+    _fmt_large,
     _normalize_key_metrics_raw,
     compute_period_returns,
     map_dividends,
     map_earnings,
     map_faq,
+    map_historical,
+    map_index_component,
     map_ohlcv,
     map_ownership,
     map_statistics,
@@ -39,6 +44,21 @@ DIVIDENDS_CACHE_TTL = 86400
 OWNERSHIP_CACHE_TTL = 86400
 PERIOD_RETURNS_CACHE_TTL = 3600
 FAQ_CACHE_TTL = 3600
+HISTORICAL_CACHE_TTL = 3600
+INDEX_COMPONENTS_CACHE_TTL = 300
+
+_STOCK_MERGE_FIELDS = (
+    "shares",
+    "free_float",
+    "market_cap",
+    "high52",
+    "low52",
+    "ucap",
+    "lcap",
+    "ldcv",
+    "ldcp",
+    "listed_in",
+)
 
 
 class CompanyService:
@@ -105,6 +125,16 @@ class CompanyService:
 
         async def fetch():
             quote = self.capital_stake._unwrap_data(await self.capital_stake.get_single_quote(ticker))
+            try:
+                stock_raw = await self.capital_stake.get_stock_overview_raw(ticker)
+                merged_quote = dict(quote) if isinstance(quote, dict) else {}
+                for field in _STOCK_MERGE_FIELDS:
+                    if stock_raw.get(field) is not None:
+                        merged_quote[field] = stock_raw[field]
+                quote = merged_quote
+            except ExternalServiceError:
+                pass
+
             metrics: dict[str, Any] = {}
             try:
                 metrics = self.capital_stake._unwrap_data(await self.capital_stake.get_consensus_ratings(ticker))
@@ -236,7 +266,54 @@ class CompanyService:
 
         async def fetch():
             raw = self.capital_stake._unwrap_data(await self.capital_stake.get_ownership(ticker))
-            return map_ownership(ticker, raw)
+            has_breakdown = isinstance(raw, dict) and (
+                raw.get("breakdown") or raw.get("fields")
+            )
+            if isinstance(raw, list) and raw:
+                has_breakdown = True
+
+            if not has_breakdown:
+                try:
+                    stock_raw = await self.capital_stake.get_stock_overview_raw(ticker)
+                    total_shares = _to_float(stock_raw.get("shares"), 0)
+                    free_float = _to_float(stock_raw.get("free_float"), 0)
+                    market_cap = _to_float(stock_raw.get("market_cap"), 0)
+
+                    if total_shares > 0:
+                        promoter_shares = max(total_shares - free_float, 0)
+                        promoter_pct = promoter_shares / total_shares * 100
+                        float_pct = free_float / total_shares * 100
+                        price = _to_float(stock_raw.get("ldcp"), 0)
+
+                        derived_raw = {
+                            "total": {
+                                "shares": _fmt_large(total_shares),
+                                "percent": "100.00%",
+                                "value": _fmt_large(market_cap),
+                            },
+                            "breakdown": [
+                                {
+                                    "type": "Promoter / Non-Free Float",
+                                    "color": "#2962ff",
+                                    "shares": _fmt_large(promoter_shares),
+                                    "percent": f"{promoter_pct:.2f}%",
+                                    "value": _fmt_large(promoter_shares * price) if price else "—",
+                                },
+                                {
+                                    "type": "Free Float",
+                                    "color": "#22c55e",
+                                    "shares": _fmt_large(free_float),
+                                    "percent": f"{float_pct:.2f}%",
+                                    "value": _fmt_large(free_float * price) if price else "—",
+                                },
+                            ],
+                            "topHolders": [],
+                        }
+                        return map_ownership(ticker, derived_raw)
+                except ExternalServiceError:
+                    pass
+
+            return map_ownership(ticker, raw if isinstance(raw, dict) else {})
 
         return await self._cached(cache_key, OWNERSHIP_CACHE_TTL, fetch)
 
@@ -261,3 +338,48 @@ class CompanyService:
             return map_faq(ticker, quote.name, quote.price, quote.currency)
 
         return await self._cached(cache_key, FAQ_CACHE_TTL, fetch)
+
+    async def get_historical(
+        self, ticker: str, range_: str = "1y", interval: str = "1d",
+    ) -> tuple[HistoricalDataResponse, bool, int]:
+        validate_ohlcv_params(range_, interval)
+        cache_key = f"company:historical:{ticker.upper()}:{range_}:{interval}"
+
+        async def fetch():
+            raw = self.capital_stake._unwrap_data(
+                await self.capital_stake.get_eod_for_range(ticker, range_)
+            )
+            ohlcv = map_ohlcv(ticker, raw, range_, interval)
+            return map_historical(ticker, ohlcv)
+
+        return await self._cached(cache_key, HISTORICAL_CACHE_TTL, fetch)
+
+    async def get_index_components(
+        self, ticker: str,
+    ) -> tuple[IndexComponentResponse, bool, int]:
+        cache_key = f"company:index_components:{ticker.upper()}"
+
+        async def fetch():
+            stock_raw = await self.capital_stake.get_stock_overview_raw(ticker)
+            listed_in: list[str] = stock_raw.get("listed_in") or []
+            if not isinstance(listed_in, list):
+                listed_in = []
+
+            components = []
+            for code in listed_in:
+                code_str = str(code).strip()
+                if not code_str:
+                    continue
+                try:
+                    idx_raw = self.capital_stake._unwrap_data(
+                        await self.capital_stake.get_index(code_str)
+                    )
+                    if not isinstance(idx_raw, dict):
+                        continue
+                    components.append(map_index_component(code_str, idx_raw))
+                except (ExternalServiceError, ResourceNotFoundError):
+                    continue
+
+            return IndexComponentResponse(ticker=ticker.upper(), components=components)
+
+        return await self._cached(cache_key, INDEX_COMPONENTS_CACHE_TTL, fetch)

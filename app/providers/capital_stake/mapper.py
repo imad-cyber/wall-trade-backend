@@ -3,6 +3,7 @@ from datetime import datetime, timezone
 from typing import Any, Optional
 
 from app.api.v1.schemas.company import (
+    CompanyExecutiveItem,
     CompanyOverviewResponse,
     CompanyProfileResponse,
     PreMarketSchema,
@@ -149,6 +150,10 @@ def map_overview(
 
 def map_profile_basic(ticker: str, raw: dict[str, Any]) -> CompanyProfileResponse:
     sector = _first(raw, "sector", "sectorName", "sector_name", "sector_code")
+    ceo = _first(raw, "ceo", "ceoName", "ceo_name")
+    executives: list[CompanyExecutiveItem] = []
+    if ceo:
+        executives = [CompanyExecutiveItem(name=str(ceo), title="Chief Executive Officer")]
     return CompanyProfileResponse(
         ticker=ticker.upper(),
         description=_first(raw, "description", "businessSummary", "business_summary"),
@@ -159,7 +164,10 @@ def map_profile_basic(ticker: str, raw: dict[str, Any]) -> CompanyProfileRespons
         website=_first(raw, "website", "webSite", "web_site"),
         founded_year=_first(raw, "foundedYear", "founded_year", "yearFounded"),
         headquarters=_first(raw, "headquarters", "address", "city"),
-        ceo=_first(raw, "ceo", "ceoName", "ceo_name"),
+        ceo=ceo,
+        phone=_first(raw, "phone", "phoneNumber", "phone_number"),
+        email=_first(raw, "email", "emailAddress"),
+        executives=executives,
     )
 
 

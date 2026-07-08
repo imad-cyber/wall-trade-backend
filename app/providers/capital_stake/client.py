@@ -42,6 +42,12 @@ class CapitalStakeClient:
                 continue
         return {"status": "ok", "data": {}}
 
+    async def get_stock_overview_raw(self, ticker: str) -> dict[str, Any]:
+        """Single Symbol Overview (#2) — /market/stock; always explicit call."""
+        upper = ticker.upper()
+        raw = await self._get_json("/market/stock", params={"symbol": upper})
+        return self._normalize_row(self._unwrap_data(raw))
+
     async def get_symbol_overview(self, ticker: str) -> dict[str, Any]:
         return await self.get_single_quote(ticker)
 
