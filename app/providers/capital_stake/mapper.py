@@ -148,16 +148,30 @@ def map_overview(
     return CompanyOverviewResponse(**data)
 
 
+def _map_people(people_raw: list) -> list[CompanyExecutiveItem]:
+    """Map CS API people[] [{name, position}, ...] to executive items."""
+    executives: list[CompanyExecutiveItem] = []
+    for person in people_raw:
+        if not isinstance(person, dict):
+            continue
+        name = str(person.get("name") or "").strip()
+        title = str(person.get("position") or person.get("title") or "").strip()
+        if name:
+            executives.append(CompanyExecutiveItem(name=name, title=title or "—"))
+    return executives
+
+
 def map_profile_basic(ticker: str, raw: dict[str, Any]) -> CompanyProfileResponse:
     sector = _first(raw, "sector", "sectorName", "sector_name", "sector_code")
+    industry = _first(raw, "industry", "industryName", "industry_name") or sector
     ceo = _first(raw, "ceo", "ceoName", "ceo_name")
-    executives: list[CompanyExecutiveItem] = []
-    if ceo:
+    executives = _map_people(raw.get("people") or [])
+    if not executives and ceo:
         executives = [CompanyExecutiveItem(name=str(ceo), title="Chief Executive Officer")]
     return CompanyProfileResponse(
         ticker=ticker.upper(),
         description=_first(raw, "description", "businessSummary", "business_summary"),
-        industry=_first(raw, "industry", "industryName", "industry_name"),
+        industry=industry,
         sector=sector,
         employees=str(_first(raw, "employees", "fullTimeEmployees", "full_time_employees", default="")) or None,
         market=str(_first(raw, "market", "exchange", default="PSX") or "PSX"),

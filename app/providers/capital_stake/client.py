@@ -1,4 +1,5 @@
 """Capital Stake (csapis.com) API v3 client."""
+import asyncio
 from datetime import date, timedelta
 from typing import Any, Optional
 
@@ -16,6 +17,8 @@ from app.providers.capital_stake.v3_paths import TICKER_LIST_PATHS, financial_st
 
 class CapitalStakeClient:
     """HTTP client for csapis.com market data (API v3)."""
+
+    _sector_cache: dict[str, str] = {}
 
     def __init__(self, http=None):
         settings = get_settings()
@@ -72,9 +75,84 @@ class CapitalStakeClient:
         quote_raw, profile_raw = await self._fetch_quote_and_profile(ticker)
         return map_overview(ticker, quote_raw, profile_raw)
 
+    async def get_profile_enriched(self, ticker: str) -> dict[str, Any]:
+        """Fetch profile overview and stock overview in parallel with sector enrichment."""
+        upper = ticker.upper()
+        profile_raw, stock_raw = await asyncio.gather(
+            self._get_json("/company/profile/overview", params={"symbol": upper}),
+            self._get_json("/market/stock", params={"symbol": upper}),
+            return_exceptions=True,
+        )
+        profile_data = (
+            self._normalize_row(self._unwrap_data(profile_raw))
+            if not isinstance(profile_raw, Exception)
+            else {}
+        )
+        stock_data = (
+            self._normalize_row(self._unwrap_data(stock_raw))
+            if not isinstance(stock_raw, Exception)
+            else {}
+        )
+
+        if sector_code := stock_data.get("sector"):
+            profile_data.setdefault("sector_code", sector_code)
+            sector_name = await self._get_sector_name(str(sector_code))
+            profile_data.setdefault("sector", sector_name or sector_code)
+            profile_data.setdefault("industry", sector_name or sector_code)
+
+        other = profile_data.get("other") or {}
+        if isinstance(other, dict):
+            for key in ("employees", "Employees", "NoOfEmployees", "no_of_employees"):
+                if val := other.get(key):
+                    profile_data.setdefault("employees", str(val))
+                    break
+
+        details = profile_data.get("details") or []
+        if isinstance(details, list):
+            for row in details:
+                if isinstance(row, list) and len(row) == 2:
+                    if "employee" in str(row[0]).lower():
+                        profile_data.setdefault("employees", str(row[1]))
+                        break
+
+        return {"status": "ok", "data": profile_data}
+
+    async def _get_sector_name(self, sector_code: str) -> str | None:
+        if sector_code in self._sector_cache:
+            return self._sector_cache[sector_code]
+        try:
+            raw = await self._get_json("/market/sectors")
+            sectors = self._unwrap_data(raw)
+            if isinstance(sectors, list):
+                for sector in sectors:
+                    if not isinstance(sector, dict):
+                        continue
+                    code = str(sector.get("code", sector.get("sector_code", "")))
+                    name = str(sector.get("name", sector.get("sector_name", "")))
+                    if code and name:
+                        self._sector_cache[code] = name
+            return self._sector_cache.get(sector_code)
+        except Exception:
+            return None
+
     async def get_profile(self, ticker: str) -> CompanyProfileResponse:
-        raw = await self.get_company_profile_basic(ticker)
-        return map_profile_basic(ticker, self._unwrap_data(raw))
+        try:
+            raw = await self.get_profile_enriched(ticker)
+            return map_profile_basic(ticker, self._unwrap_data(raw))
+        except (ExternalServiceError, ResourceNotFoundError):
+            raw = await self.get_company_profile_basic(ticker)
+            return map_profile_basic(ticker, self._unwrap_data(raw))
+
+    async def get_index_constituents(self, index_code: str = "KSE100", page: int = 1) -> dict[str, Any]:
+        """Index Constituents (#13) — /market/index/constituents"""
+        return await self._get_json(
+            "/market/index/constituents",
+            params={"code": index_code, "page": page},
+        )
+
+    async def get_key_metrics_annual(self, ticker: str) -> dict[str, Any]:
+        """Key Metrics Annual (#14)."""
+        return await self.get_financial_statement(ticker, "income", "annual")
 
     async def get_company_profile(self, ticker: str) -> CompanyProfile:
         overview = await self.get_company_overview(ticker)

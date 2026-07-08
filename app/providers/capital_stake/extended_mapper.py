@@ -255,6 +255,18 @@ def map_ohlcv(ticker: str, raw: dict[str, Any], range_: str, interval: str) -> O
 
 
 FEATURED_INDEX_SYMBOLS = frozenset({"KSE100", "KSE-100", "KSE_100"})
+_PSX_INDEX_PRIORITY = ["KSE100", "KSE30", "KSEALL", "BKTI", "MZNPI", "OGPTI"]
+
+
+def _sort_major_indices(indices: list[MarketSummaryIndex]) -> list[MarketSummaryIndex]:
+    def sort_key(idx: MarketSummaryIndex) -> tuple[int, int]:
+        code = idx.symbol.upper().replace("-", "").replace("_", "")
+        for i, priority in enumerate(_PSX_INDEX_PRIORITY):
+            if code == priority or code.startswith(priority):
+                return (0, i)
+        return (1, 0)
+
+    return sorted(indices, key=sort_key)
 
 
 def _map_index_row(row: dict[str, Any]) -> MarketSummaryIndex:
@@ -291,6 +303,7 @@ def map_market_summary(
     indices_raw: list[dict[str, Any]],
     chart_points: list[OHLCVPoint],
     market_status: str = "Closed",
+    kse100_override: dict[str, Any] | None = None,
 ) -> MarketSummaryResponse:
     indices = [_map_index_row(row) for row in indices_raw if isinstance(row, dict)]
     featured = _pick_featured_index(indices)
@@ -303,7 +316,25 @@ def map_market_summary(
             change_percent=0.0,
         )
 
-    major = [idx for idx in indices if idx.symbol != featured.symbol][:6]
+    if kse100_override:
+        close = _to_float(
+            _first(kse100_override, "close", "value", "lastPrice", "ldci"),
+            featured.price,
+        )
+        change_pct = _normalize_change_percent(
+            _first(kse100_override, "change_percent", "changePercent", "pctChange")
+        )
+        featured = MarketSummaryIndex(
+            name=str(_first(kse100_override, "name", default=featured.name)),
+            symbol="KSE100",
+            price=close,
+            currency="PKR",
+            change_percent=change_pct,
+            is_delayed=False,
+        )
+
+    non_featured = [idx for idx in indices if idx.symbol != featured.symbol]
+    major = _sort_major_indices(non_featured)[:6]
     chart_data = [
         MarketSummaryChartPoint(
             time=point.date[-5:] if len(point.date) >= 5 else point.date,

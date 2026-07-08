@@ -8,6 +8,8 @@ from app.api.v1.schemas.market import (
     MarketSummaryResponse,
     OHLCVResponse,
     OpexDatesResponse,
+    PeerMetric,
+    PeerMetricPositions,
     PeersComparisonResponse,
     RelatedTickersResponse,
 )
@@ -22,7 +24,6 @@ from app.providers.capital_stake.extended_mapper import (
     compute_opex_dates,
     map_market_summary,
     map_ohlcv,
-    map_peers,
     map_related,
     validate_ohlcv_params,
 )
@@ -107,24 +108,128 @@ class MarketService:
         cache_key = f"market:peers:{ticker.upper()}:{category}"
 
         async def fetch():
-            profile = self.capital_stake._unwrap_data(
-                await self.capital_stake.get_company_profile_basic(ticker)
+            upper = ticker.upper()
+
+            stock_raw = self.capital_stake._unwrap_data(
+                await self.capital_stake.get_single_quote(upper)
             )
-            sector = str(profile.get("sector", profile.get("sector_code", "0801")))
-            peers_raw: list[str] = []
+            sector_code = str(stock_raw.get("sector", "")).strip()
+
+            peer_tickers: list[str] = []
             try:
-                constituents = self.capital_stake._unwrap_data(
-                    await self.capital_stake.get_sector_constituents(sector)
+                constituents_raw = self.capital_stake._unwrap_data(
+                    await self.capital_stake.get_index_constituents("KSE100", page=1)
                 )
-                if isinstance(constituents, list):
-                    peers_raw = [
-                        str(p.get("ticker", p.get("symbol", p.get("s", "")))).upper()
-                        for p in constituents
-                        if isinstance(p, dict)
-                    ][:5]
+                items = _rows_from_list(constituents_raw) if not isinstance(constituents_raw, list) else [
+                    row for row in constituents_raw if isinstance(row, dict)
+                ]
+                for item in items:
+                    sym = str(item.get("symbol", item.get("ticker", ""))).upper()
+                    item_sector = str(item.get("sector", ""))
+                    if sym and sym != upper and item_sector == sector_code:
+                        peer_tickers.append(sym)
+                        if len(peer_tickers) >= 4:
+                            break
             except ExternalServiceError:
-                peers_raw = []
-            return map_peers(ticker, sector, peers_raw, [])
+                pass
+
+            all_tickers = [upper] + peer_tickers
+            results = await asyncio.gather(
+                *[self.capital_stake.get_key_metrics_annual(t) for t in all_tickers],
+                return_exceptions=True,
+            )
+
+            def extract_metrics(raw_result: Any) -> dict[str, float | None]:
+                if isinstance(raw_result, Exception):
+                    return {}
+                data = self.capital_stake._unwrap_data(raw_result)
+                fundamentals = data.get("fundementals", []) if isinstance(data, dict) else []
+                extracted: dict[str, float | None] = {}
+                for item in fundamentals:
+                    if not isinstance(item, dict):
+                        continue
+                    name = str(item.get("name", "")).lower()
+                    values = item.get("values", [])
+                    ttm = values[0] if values else None
+                    if "price earnings" in name or "p/e" in name:
+                        extracted["pe"] = float(ttm) if ttm is not None else None
+                    elif "earnings per share" in name:
+                        extracted["eps"] = float(ttm) if ttm is not None else None
+                    elif "book value per share" in name:
+                        extracted["book_value"] = float(ttm) if ttm is not None else None
+                    elif "dividend yield" in name:
+                        extracted["div_yield"] = float(ttm) if ttm is not None else None
+                    elif "net profit margin" in name:
+                        extracted["net_margin"] = float(ttm) if ttm is not None else None
+                    elif "price/book" in name or "price to book" in name:
+                        extracted["pb"] = float(ttm) if ttm is not None else None
+                return extracted
+
+            ticker_metrics = {t: extract_metrics(r) for t, r in zip(all_tickers, results)}
+            subject_metrics = ticker_metrics.get(upper, {})
+            peer_data = [ticker_metrics[t] for t in peer_tickers if t in ticker_metrics]
+
+            def peer_avg(key: str) -> float | None:
+                vals = [m[key] for m in peer_data if m.get(key) is not None]
+                return sum(vals) / len(vals) if vals else None
+
+            def sector_avg(key: str) -> float | None:
+                all_vals = [m[key] for m in ticker_metrics.values() if m.get(key) is not None]
+                return sum(all_vals) / len(all_vals) if all_vals else None
+
+            def fmt(val: float | None, pct: bool = False) -> str:
+                if val is None:
+                    return "—"
+                if pct:
+                    return f"{val:.1f}%"
+                return f"{val:.2f}"
+
+            def positions(subj: float | None, peers_val: float | None, sect_val: float | None) -> dict[str, int]:
+                vals = [v for v in [subj, peers_val, sect_val] if v is not None]
+                if not vals:
+                    return {"subject": 50, "peers": 50, "sector": 50}
+                lo, hi = min(vals), max(vals)
+                span = hi - lo or 1
+
+                def pct_pos(v: float | None) -> int:
+                    return int((v - lo) / span * 90 + 5) if v is not None else 50
+
+                return {
+                    "subject": pct_pos(subj),
+                    "peers": pct_pos(peers_val),
+                    "sector": pct_pos(sect_val),
+                }
+
+            rows: list[PeerMetric] = []
+            metric_defs = [
+                ("P/E Ratio", "pe", False),
+                ("EPS (Rs.)", "eps", False),
+                ("Book Value/Share", "book_value", False),
+                ("Dividend Yield", "div_yield", True),
+                ("Net Profit Margin", "net_margin", True),
+            ]
+            for label, key, is_pct in metric_defs:
+                s = subject_metrics.get(key)
+                p = peer_avg(key)
+                se = sector_avg(key)
+                pos = positions(s, p, se)
+                rows.append(
+                    PeerMetric(
+                        metric=label,
+                        subject=fmt(s, is_pct),
+                        peers=fmt(p, is_pct),
+                        sector=fmt(se, is_pct),
+                        positions=PeerMetricPositions(**pos),
+                    )
+                )
+
+            return PeersComparisonResponse(
+                ticker=upper,
+                sector=sector_code,
+                peers=peer_tickers,
+                categories=["Value"],
+                metrics=rows,
+            )
 
         return await self._cached(cache_key, PEERS_CACHE_TTL, fetch)
 
@@ -177,14 +282,29 @@ class MarketService:
         cache_key = "market:summary"
 
         async def fetch():
-            indices_raw = self.capital_stake._unwrap_data(await self.capital_stake.get_indices())
+            indices_resp, kse100_resp, status_resp = await asyncio.gather(
+                self.capital_stake.get_indices(),
+                self.capital_stake.get_index("KSE100"),
+                self.capital_stake.get_market_status(),
+                return_exceptions=True,
+            )
+
+            indices_raw = (
+                self.capital_stake._unwrap_data(indices_resp)
+                if not isinstance(indices_resp, Exception)
+                else []
+            )
             indices_list = indices_raw if isinstance(indices_raw, list) else _rows_from_list(indices_raw)
 
+            kse100_data: dict[str, Any] = {}
+            if not isinstance(kse100_resp, Exception):
+                unwrapped = self.capital_stake._unwrap_data(kse100_resp)
+                if isinstance(unwrapped, dict):
+                    kse100_data = unwrapped
+
             market_status = "Closed"
-            try:
-                status_raw = self.capital_stake._unwrap_data(
-                    await self.capital_stake.get_market_status()
-                )
+            if not isinstance(status_resp, Exception):
+                status_raw = self.capital_stake._unwrap_data(status_resp)
                 if isinstance(status_raw, dict):
                     market_status = _map_v3_market_state(
                         str(
@@ -195,8 +315,6 @@ class MarketService:
                             or "SUS"
                         )
                     )
-            except ExternalServiceError:
-                pass
 
             featured_symbol = "KSE100"
             for row in indices_list:
@@ -223,7 +341,12 @@ class MarketService:
             except ExternalServiceError:
                 chart_points = []
 
-            return map_market_summary(indices_list, chart_points, market_status=market_status)
+            return map_market_summary(
+                indices_list,
+                chart_points,
+                market_status=market_status,
+                kse100_override=kse100_data or None,
+            )
 
         return await self._cached(cache_key, SUMMARY_CACHE_TTL, fetch)
 
