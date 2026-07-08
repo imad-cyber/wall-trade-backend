@@ -72,11 +72,137 @@ def _rows_from_list(raw: Any) -> list[dict[str, Any]]:
     if isinstance(raw, list):
         return [r for r in raw if isinstance(r, dict)]
     if isinstance(raw, dict):
-        for key in ("data", "result", "rows", "points", "history", "items"):
+        for key in ("data", "result", "rows", "points", "history", "items", "articles", "news"):
             val = raw.get(key)
             if isinstance(val, list):
                 return [r for r in val if isinstance(r, dict)]
     return []
+
+
+def _is_key_metrics_pivot(rows: list[dict[str, Any]]) -> bool:
+    if not rows:
+        return False
+    sample = rows[: min(3, len(rows))]
+    return all(
+        isinstance(row, dict) and "name" in row and "period" in row and "value" in row
+        for row in sample
+    )
+
+
+# Capital Stake key-metrics `name` → internal field (substring match, case-insensitive).
+# Names confirmed via https://capitalstake.com/docs/.../key-metrics
+NAME_TO_FIELD: dict[str, str] = {
+    "sales": "revenue",
+    "earnings per share": "eps",
+    "profit after taxation": "net_income",
+    "dividend per share": "dividend_per_share",
+    "cash payout ratio": "payout_ratio",
+    "payout ratio": "payout_ratio",
+    "book value per share": "book_value_per_share",
+    "price earnings ratio": "pe_ratio",
+    "price to earnings": "pe_ratio",
+    "price/book ratio": "pb_ratio",
+    "price to book": "pb_ratio",
+    "long term debt to equity": "debt_to_equity",
+    "debt to equity": "debt_to_equity",
+    "current ratio": "current_ratio",
+    "gross profit margin": "gross_margin",
+    "dividend yield": "dividend_yield",
+    "net profit margin": "net_profit_margin",
+    "return on equity": "roe",
+    "return on assets": "roa",
+    "operating cash flow": "operating_cash_flow",
+    "capital expenditure": "capex",
+    "free cash flow": "free_cash_flow",
+}
+
+
+def _normalize_key_metrics_raw(raw: Any) -> list[dict[str, Any]]:
+    """Normalize Capital Stake key-metrics into `{name, period, value}` pivot rows."""
+    if isinstance(raw, list):
+        if _is_key_metrics_pivot(raw):
+            return [row for row in raw if isinstance(row, dict)]
+        return [row for row in raw if isinstance(row, dict)]
+    if isinstance(raw, dict):
+        periods = raw.get("periods")
+        fundamentals = raw.get("fundementals") or raw.get("fundamentals")
+        if isinstance(periods, list) and isinstance(fundamentals, list):
+            rows: list[dict[str, Any]] = []
+            for metric in fundamentals:
+                if not isinstance(metric, dict):
+                    continue
+                name = str(metric.get("name", ""))
+                values = metric.get("values") or []
+                for idx, period in enumerate(periods):
+                    if idx < len(values):
+                        rows.append(
+                            {"name": name, "period": str(period), "value": values[idx]}
+                        )
+            return rows
+    return []
+
+
+def _extract_key_metric(
+    rows: list[dict[str, Any]] | Any,
+    name_pattern: str,
+    default: Any = None,
+    *,
+    skip_ttm: bool = True,
+) -> Any:
+    """Extract the most recent non-TTM value for a named metric from key-metrics data."""
+    pivot_rows = _normalize_key_metrics_raw(rows) if not (
+        isinstance(rows, list) and rows and _is_key_metrics_pivot(rows)
+    ) else rows
+    pattern = name_pattern.lower()
+    for row in pivot_rows:
+        if not isinstance(row, dict):
+            continue
+        if pattern not in str(row.get("name", "")).lower():
+            continue
+        period = str(row.get("period", "")).upper()
+        if skip_ttm and period == "TTM":
+            continue
+        return row.get("value", default)
+    return default
+
+
+def _period_sort_key(period: str) -> tuple[int, int]:
+    parts = period.strip().split()
+    if len(parts) == 2 and parts[0].startswith("Q"):
+        try:
+            return (int(parts[1]), int(parts[0][1:]))
+        except ValueError:
+            pass
+    if parts and parts[0].isdigit():
+        return (int(parts[0]), 0)
+    return (0, 0)
+
+
+def _rows_from_key_metrics_pivot(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Pivot Capital Stake key-metrics rows `{name, period, value}` into period records."""
+    pivot_rows = _normalize_key_metrics_raw(rows) if not _is_key_metrics_pivot(rows) else rows
+    by_period: dict[str, dict[str, Any]] = {}
+    # Longer patterns first to avoid partial substring collisions.
+    patterns = sorted(NAME_TO_FIELD.items(), key=lambda item: len(item[0]), reverse=True)
+    for row in pivot_rows:
+        period = str(row.get("period", "")).strip()
+        if not period or period.upper() == "TTM":
+            continue
+        name_lower = str(row.get("name", "")).lower().strip()
+        value = row.get("value")
+        slot = by_period.setdefault(
+            period,
+            {"period": period, "period_label": period},
+        )
+        for pattern, field in patterns:
+            if pattern in name_lower:
+                slot[field] = value
+                break
+    return sorted(
+        by_period.values(),
+        key=lambda item: _period_sort_key(str(item.get("period", ""))),
+        reverse=True,
+    )
 
 
 def _map_v3_market_state(state: str) -> str:
@@ -300,8 +426,9 @@ def map_statistics(ticker: str, quote: dict, metrics: dict, *, tier: str) -> Com
         {"label": "Dividend (Yield)", "value": str(_first(m, "dividendYield", "yield_estimate", default="—")), "locked": False},
     ]
     ratio_items = [
-        {"label": "Return on Assets", "value": f"{_to_float(_first(m, 'returnOnAssets')):.1f}%", "locked": False},
-        {"label": "Return on Equity", "value": f"{_to_float(_first(m, 'returnOnEquity')):.1f}%", "locked": False},
+        {"label": "Return on Assets", "value": f"{_to_float(_first(m, 'returnOnAssets', 'roa')):.1f}%", "locked": False},
+        {"label": "Return on Equity", "value": f"{_to_float(_first(m, 'returnOnEquity', 'roe')):.1f}%", "locked": False},
+        {"label": "Book Value", "value": str(_first(m, "book_value", "book_value_per_share", default="—")), "locked": False},
         {"label": "Beta", "value": str(_first(m, "beta", default="—")), "locked": False},
     ]
 
@@ -367,7 +494,19 @@ def _financial_rows_from_v3(raw: dict[str, Any]) -> list[dict[str, Any]]:
 
 
 def map_earnings(ticker: str, raw: dict[str, Any]) -> EarningsResponse:
-    rows = _financial_rows_from_v3(raw) if isinstance(raw, dict) and raw.get("fields") else _rows_from_list(raw)
+    if isinstance(raw, dict) and raw.get("fields"):
+        rows = _financial_rows_from_v3(raw)
+    else:
+        pivot_rows = _normalize_key_metrics_raw(raw)
+        if pivot_rows and _is_key_metrics_pivot(pivot_rows):
+            rows = _rows_from_key_metrics_pivot(pivot_rows)
+        else:
+            list_rows = _rows_from_list(raw)
+            rows = (
+                _rows_from_key_metrics_pivot(list_rows)
+                if _is_key_metrics_pivot(list_rows)
+                else list_rows
+            )
     chart: list[EarningsChartPoint] = []
     for row in rows[:8]:
         chart.append(
@@ -381,13 +520,21 @@ def map_earnings(ticker: str, raw: dict[str, Any]) -> EarningsResponse:
             )
         )
     latest = rows[0] if rows else {}
+    prior = rows[1] if len(rows) > 1 else {}
     summary = EarningsSummary(
         latest_release=str(_first(latest, "date", "period", default=""))[:10] or None,
         eps=_to_float(_first(latest, "eps")) or None,
-        eps_forecast=_to_float(_first(latest, "epsForecast", "eps_forecast")) or None,
+        eps_forecast=_to_float(_first(latest, "epsForecast", "eps_forecast"))
+        or (_to_float(_first(prior, "eps")) or None),
         revenue=_to_float(_first(latest, "revenue")) or None,
-        revenue_forecast=_to_float(_first(latest, "revenueForecast", "revenue_forecast")) or None,
-        next_earnings_date=str(_first(raw, "nextEarningsDate", "next_earnings_date", default=""))[:10] or None,
+        revenue_forecast=_to_float(_first(latest, "revenueForecast", "revenue_forecast"))
+        or (_to_float(_first(prior, "revenue")) or None),
+        next_earnings_date=(
+            str(_first(raw, "nextEarningsDate", "next_earnings_date", default=""))[:10]
+            if isinstance(raw, dict)
+            else None
+        )
+        or None,
     )
     if summary.eps and summary.eps_forecast:
         summary.eps_beat = summary.eps >= summary.eps_forecast
@@ -524,7 +671,15 @@ def map_financial_statement(
     statement_type: str,
     period: str,
 ) -> FinancialStatementResponse:
-    rows_raw = _financial_rows_from_v3(raw) if isinstance(raw, dict) and raw.get("fields") else _rows_from_list(raw)
+    if isinstance(raw, dict) and raw.get("fields"):
+        rows_raw = _financial_rows_from_v3(raw)
+    else:
+        pivot_rows = _normalize_key_metrics_raw(raw)
+        rows_raw = (
+            _rows_from_key_metrics_pivot(pivot_rows)
+            if pivot_rows
+            else _rows_from_list(raw)
+        )
     rows: list[FinancialStatementRow] = []
     for row in rows_raw:
         rows.append(

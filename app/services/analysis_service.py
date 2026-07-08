@@ -1,4 +1,5 @@
 """Contract analysis service — A1 through A5."""
+import logging
 from typing import Any, AsyncIterator, Optional
 
 from app.ai.analysis_pipeline import AnalysisPipeline
@@ -9,6 +10,7 @@ from app.api.v1.schemas.analysis import (
     TechnicalAnalysisResponse,
 )
 from app.core.config import get_settings
+from app.core.exceptions import ExternalServiceError
 from app.domain.analysis.models import AnalysisCache
 from app.providers.capital_stake.client import CapitalStakeClient
 from app.providers.capital_stake.extended_mapper import (
@@ -23,8 +25,12 @@ from app.repositories.analysis_repository import AnalysisRepository
 from app.services.cache_service import CacheService
 from app.utils.tiering import get_user_tier
 
+logger = logging.getLogger(__name__)
+
 CACHE_ANALYST = 86400
 CACHE_TECHNICAL = 900
+
+_PROVIDER_ERRORS = (ExternalServiceError, KeyError, TypeError, ValueError)
 
 
 class AnalysisService:
@@ -74,28 +80,46 @@ class AnalysisService:
 
         quote = await self.capital_stake.get_stock_quote(ticker)
         ratings_raw: list[dict] = []
+
+        # CS consensus endpoints are not in the current subscription (stub returns empty).
         try:
             consensus = self.capital_stake._unwrap_data(
                 await self.capital_stake.get_consensus_ratings(ticker)
             )
-            if isinstance(consensus, dict):
+            if isinstance(consensus, dict) and consensus:
                 result = map_analyst_from_consensus(ticker, consensus, quote.price, page, limit)
                 self._memory.set(cache_key, result, CACHE_ANALYST)
                 return result, False, 0
-        except Exception:
-            pass
+            logger.info(
+                "analyst: CS consensus stub returned empty for %s, trying targets",
+                ticker.upper(),
+            )
+        except _PROVIDER_ERRORS:
+            logger.info(
+                "analyst: CS consensus unavailable for %s, trying targets",
+                ticker.upper(),
+            )
+
         try:
             targets = self.capital_stake._unwrap_data(await self.capital_stake.get_analyst_targets(ticker))
             if isinstance(targets, list) and targets:
                 result = map_analyst_from_targets(ticker, targets, quote.price, page, limit)
                 self._memory.set(cache_key, result, CACHE_ANALYST)
                 return result, False, 0
-        except Exception:
-            pass
+            logger.info(
+                "analyst: CS targets stub returned empty for %s, trying Supabase analysis_cache",
+                ticker.upper(),
+            )
+        except _PROVIDER_ERRORS:
+            logger.info(
+                "analyst: CS targets unavailable for %s, trying Supabase analysis_cache",
+                ticker.upper(),
+            )
+
         try:
             rows = self.analysis_repo.list(limit=100, filters={"ticker": ticker.upper()})
             ratings_raw = rows
-        except Exception:
+        except _PROVIDER_ERRORS:
             ratings_raw = []
 
         from app.providers.capital_stake.extended_mapper import map_analyst

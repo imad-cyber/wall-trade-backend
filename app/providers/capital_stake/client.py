@@ -116,22 +116,55 @@ class CapitalStakeClient:
     async def get_eod_for_range(self, ticker: str, range_: str = "2y") -> dict[str, Any]:
         return await self.get_eod_data(ticker, lookback_days=lookback_days_for_range(range_))
 
+    def _news_date_range(
+        self,
+        *,
+        date_from: str | None = None,
+        date_to: str | None = None,
+        lookback_days: int = 30,
+    ) -> tuple[str, str]:
+        end = date_to or date.today().isoformat()
+        start = date_from or (date.today() - timedelta(days=lookback_days)).isoformat()
+        return start, end
+
     async def get_company_news(
         self,
         ticker: str,
         *,
         offset: int | None = None,
+        date_from: str | None = None,
+        date_to: str | None = None,
     ) -> dict[str, Any]:
-        params: dict[str, Any] = {"symbol": ticker.upper()}
+        start, end = self._news_date_range(date_from=date_from, date_to=date_to)
+        params: dict[str, Any] = {
+            "symbol": ticker.upper(),
+            "date_from": start,
+            "date_to": end,
+        }
         if offset is not None:
             params["offset"] = offset
         return await self._get_json("/news/company", params=params)
 
-    async def get_sector_news(self, sector: str = "all") -> dict[str, Any]:
+    async def get_sector_news(
+        self,
+        sector: str = "all",
+        *,
+        offset: int | None = None,
+        date_from: str | None = None,
+        date_to: str | None = None,
+    ) -> dict[str, Any]:
         sector_code = sector
         if sector.lower() == "all":
             sector_code = await self._default_sector_code()
-        return await self._get_json("/news/sector", params={"sector_code": sector_code})
+        start, end = self._news_date_range(date_from=date_from, date_to=date_to)
+        params: dict[str, Any] = {
+            "sector_code": sector_code,
+            "date_from": start,
+            "date_to": end,
+        }
+        if offset is not None:
+            params["offset"] = offset
+        return await self._get_json("/news/sector", params=params)
 
     async def get_dividends(self, ticker: str) -> dict[str, Any]:
         """Dividends endpoint not in current subscription — returns empty."""
@@ -220,7 +253,8 @@ class CapitalStakeClient:
             params={"symbol": ticker.upper(), "interval": interval},
         )
 
-    async def _default_sector_code(self) -> str:
+    async def _all_sector_codes(self) -> list[str]:
+        codes: list[str] = []
         try:
             raw = self._unwrap_data(await self.get_sectors())
             if isinstance(raw, list):
@@ -229,10 +263,14 @@ class CapitalStakeClient:
                         continue
                     code = row.get("code") or row.get("sector_code") or row.get("id")
                     if code:
-                        return str(code)
+                        codes.append(str(code))
         except ExternalServiceError:
             pass
-        return "0801"
+        return codes or ["0801"]
+
+    async def _default_sector_code(self) -> str:
+        codes = await self._all_sector_codes()
+        return codes[0]
 
     async def _merge_live_ticker(self, ticker: str, quote_raw: dict[str, Any]) -> dict[str, Any]:
         """Enrich quote with live ticker row when available; never fail the caller."""

@@ -91,10 +91,18 @@ class NarrativeService:
         ohlcv, _, _ = await self.market.get_ohlcv(ticker, "2y", "1d")
         opex, _, _ = await self.market.get_opex_dates(ticker)
         price_history = [p.model_dump() for p in ohlcv.points]
+
+        earnings_list: list[dict[str, Any]] = []
+        try:
+            earnings_resp, _, _ = await self.company.get_earnings(ticker)
+            earnings_list = [point.model_dump(mode="json") for point in earnings_resp.chart]
+        except Exception:
+            pass
+
         return NarrativeTimelineResponse(
             ticker=ticker.upper(),
             stories=stories,
-            earnings=[],
+            earnings=earnings_list,
             opex_dates=opex.opex_dates,
             price_history=price_history,
         )

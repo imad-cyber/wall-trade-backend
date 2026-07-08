@@ -13,7 +13,7 @@ router = APIRouter(prefix="/news", tags=["news"])
 @router.get("/market", status_code=status.HTTP_200_OK)
 async def get_market_news(
     page: int = Query(1, ge=1),
-    page_size: int = Query(20, ge=1, le=50),
+    page_size: int = Query(20, ge=1, le=100),
     service: NewsService = Depends(get_news_service),
     user=Depends(get_optional_user),
 ):
@@ -31,7 +31,7 @@ async def get_ticker_news(
     ticker: str = TickerPath(),
     category: str = Query("Recent"),
     page: int = Query(1, ge=1),
-    page_size: int = Query(20, ge=1, le=50),
+    page_size: int = Query(20, ge=1, le=100),
     service: NewsService = Depends(get_news_service),
     user=Depends(get_optional_user),
 ):
