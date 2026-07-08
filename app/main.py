@@ -83,7 +83,11 @@ def create_app() -> FastAPI:
             "An unexpected error occurred",
             path=str(request.url.path),
         )
-        return JSONResponse(status_code=500, content=body.model_dump())
+        return JSONResponse(
+            status_code=500,
+            content=body.model_dump(),
+            headers={"X-Error-Source": "backend-unhandled"},
+        )
 
     @app.get("/health", tags=["health"])
     async def root_health_check():

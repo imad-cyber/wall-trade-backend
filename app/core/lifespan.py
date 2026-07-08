@@ -18,6 +18,17 @@ async def lifespan(app: FastAPI):
     logger.info("Starting %s v%s", settings.APP_NAME, settings.APP_VERSION)
     logger.info("Environment: %s", settings.ENVIRONMENT)
     logger.info("Capital Stake API base: %s", settings.capital_stake_base_url)
+    logger.info("CORS allowed_origins: %s", settings.allowed_origins)
+    logger.info("CORS_ORIGIN_REGEX: %s", settings.CORS_ORIGIN_REGEX)
+    logger.info(
+        "Capital Stake token configured: %s",
+        bool(settings.capital_stake_token),
+    )
+    if not settings.capital_stake_token:
+        logger.error(
+            "CRITICAL: No Capital Stake token configured — "
+            "all market data requests will fail with AUTH_ERROR"
+        )
     if settings.SUPABASE_JWT_SECRET:
         logger.info("Supabase JWT validation: HS256 secret configured")
     elif settings.SUPABASE_URL:

@@ -134,16 +134,20 @@ class CapitalStakeClient:
         return await self._get_json("/news/sector", params={"sector_code": sector_code})
 
     async def get_dividends(self, ticker: str) -> dict[str, Any]:
-        return await self._get_json("/payouts/dividends", params={"symbol": ticker.upper()})
+        """Dividends endpoint not in current subscription — returns empty."""
+        return {"status": "ok", "data": []}
 
     async def get_ownership(self, ticker: str) -> dict[str, Any]:
-        return await self._get_json("/company/shareholders", params={"symbol": ticker.upper()})
+        """Shareholder data not in current subscription — returns empty."""
+        return {"status": "ok", "data": []}
 
     async def get_analyst_targets(self, ticker: str) -> dict[str, Any]:
-        return await self._get_json("/research/targets", params={"symbol": ticker.upper()})
+        """Analyst targets not in current subscription — returns empty."""
+        return {"status": "ok", "data": []}
 
     async def get_consensus_ratings(self, ticker: str) -> dict[str, Any]:
-        return await self._get_json("/research/consensus", params={"symbol": ticker.upper()})
+        """Consensus ratings not in current subscription — returns empty."""
+        return {"status": "ok", "data": []}
 
     async def get_all_tickers(self) -> dict[str, Any]:
         rows = await self._fetch_ticker_list()
