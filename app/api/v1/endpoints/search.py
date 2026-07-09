@@ -13,7 +13,7 @@ router = APIRouter(prefix="/search", tags=["search"])
 async def search_symbols(
     q: str = Query("", min_length=0),
     exchange: str = Query("PSX"),
-    limit: int = Query(10, ge=1, le=50),
+    limit: int = Query(25, ge=1, le=50),
     service: SearchService = Depends(get_search_service),
     user=Depends(get_optional_user),
 ):
