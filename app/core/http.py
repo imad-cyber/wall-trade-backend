@@ -37,12 +37,14 @@ class AsyncHTTPClient:
         timeout: Optional[float] = None,
         retries: Optional[int] = None,
         api_key: Optional[str] = None,
+        api_key_header: Optional[str] = None,
         provider_name: str = "http",
     ):
         settings = get_settings()
         self.base_url = base_url.rstrip("/")
         self.provider_name = provider_name
         self.api_key = api_key
+        self.api_key_header = api_key_header
         self.retries = retries if retries is not None else settings.DEFAULT_MAX_RETRIES
         timeout_val = timeout if timeout is not None else settings.DEFAULT_TIMEOUT_SECONDS
         self._client = httpx.AsyncClient(
@@ -57,7 +59,10 @@ class AsyncHTTPClient:
         if ctx.request_id:
             headers["X-Request-ID"] = ctx.request_id
         if self.api_key:
-            headers["Authorization"] = f"Bearer {self.api_key}"
+            if self.api_key_header:
+                headers[self.api_key_header] = self.api_key
+            else:
+                headers["Authorization"] = f"Bearer {self.api_key}"
         return headers
 
     async def _request(self, method: str, path: str, **kwargs) -> dict[str, Any]:
@@ -160,6 +165,7 @@ def get_http_client(
     name: str,
     base_url: str,
     api_key: Optional[str] = None,
+    api_key_header: Optional[str] = None,
 ) -> AsyncHTTPClient:
     """Get or create a named HTTP client from the registry."""
     registry_key = f"{name}:{base_url.rstrip('/')}"
@@ -167,10 +173,13 @@ def get_http_client(
     if existing is not None:
         if api_key and existing.api_key != api_key:
             existing.api_key = api_key
+        if api_key_header and existing.api_key_header != api_key_header:
+            existing.api_key_header = api_key_header
         return existing
     _registry[registry_key] = AsyncHTTPClient(
         base_url,
         api_key=api_key,
+        api_key_header=api_key_header,
         provider_name=name,
     )
     return _registry[registry_key]

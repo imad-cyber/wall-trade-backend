@@ -9,6 +9,7 @@ from app.api.v1.endpoints import (
     analysis,
     analysis_contract,
     companies,
+    crypto,
     financials,
     health,
     macro,
@@ -39,6 +40,7 @@ api_router.include_router(financials.router)
 api_router.include_router(news.router)
 api_router.include_router(watchlist.router)
 api_router.include_router(search.router)
+api_router.include_router(crypto.router)
 api_router.include_router(reports.router)
 api_router.include_router(narrative.router)
 api_router.include_router(ai.router)

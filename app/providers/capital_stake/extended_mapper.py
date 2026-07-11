@@ -255,11 +255,29 @@ def map_ohlcv(ticker: str, raw: dict[str, Any], range_: str, interval: str) -> O
 
 
 FEATURED_INDEX_SYMBOLS = frozenset({"KSE100", "KSE-100", "KSE_100"})
+_PSX_INDEX_PRIORITY = (
+    "KSE30",
+    "KSEALL",
+    "ALLSHR",
+    "KMI30",
+    "MZNPI",
+    "BKTI",
+    "OGPTI",
+    "PSXDIV20",
+    "NITPGI",
+    "MII30",
+)
+
+
+def _normalize_index_code(symbol: str) -> str:
+    return symbol.upper().replace("-", "").replace("_", "")
 
 
 def _map_index_row(row: dict[str, Any]) -> MarketSummaryIndex:
-    symbol = str(_first(row, "symbol", "ticker", "code", "s", default="")).upper()
-    name = str(_first(row, "name", "indexName", "index_name", "title", "code", "s", default=symbol or "Index"))
+    symbol = str(_first(row, "code", "symbol", "ticker", "s", default="")).upper()
+    name = str(_first(row, "name", "indexName", "index_name", "title", default=symbol or "Index"))
+    if not name.strip():
+        name = symbol or "Index"
     price = _to_float(
         _first(row, "lastPrice", "last_price", "price", "close", "value", "c", "ldcp", "ldci"),
         0.0,
@@ -287,13 +305,29 @@ def _pick_featured_index(indices: list[MarketSummaryIndex]) -> MarketSummaryInde
     return indices[0] if indices else None
 
 
+def _major_index_sort_key(idx: MarketSummaryIndex) -> tuple[int, int | str]:
+    code = _normalize_index_code(idx.symbol)
+    for i, priority in enumerate(_PSX_INDEX_PRIORITY):
+        if code == priority or code.startswith(priority):
+            return (0, i)
+    return (1, code)
+
+
 def map_market_summary(
     indices_raw: list[dict[str, Any]],
     chart_points: list[OHLCVPoint],
     market_status: str = "Closed",
+    featured_raw: dict[str, Any] | None = None,
 ) -> MarketSummaryResponse:
     indices = [_map_index_row(row) for row in indices_raw if isinstance(row, dict)]
-    featured = _pick_featured_index(indices)
+    if featured_raw and isinstance(featured_raw, dict):
+        featured = _map_index_row(featured_raw)
+        if not featured.name.strip():
+            featured = featured.model_copy(update={"name": "KSE-100"})
+        if not featured.symbol:
+            featured = featured.model_copy(update={"symbol": "KSE100"})
+    else:
+        featured = _pick_featured_index(indices)
     if featured is None:
         featured = MarketSummaryIndex(
             name="KSE-100",
@@ -303,7 +337,15 @@ def map_market_summary(
             change_percent=0.0,
         )
 
-    major = [idx for idx in indices if idx.symbol != featured.symbol][:6]
+    featured_code = _normalize_index_code(featured.symbol)
+    major = sorted(
+        [
+            idx
+            for idx in indices
+            if _normalize_index_code(idx.symbol) != featured_code and idx.price > 0
+        ],
+        key=_major_index_sort_key,
+    )[:6]
     chart_data = [
         MarketSummaryChartPoint(
             time=point.date[-5:] if len(point.date) >= 5 else point.date,

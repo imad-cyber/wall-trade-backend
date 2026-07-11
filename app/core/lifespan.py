@@ -29,6 +29,12 @@ async def lifespan(app: FastAPI):
             "CRITICAL: No Capital Stake token configured — "
             "all market data requests will fail with AUTH_ERROR"
         )
+    logger.info("CoinGecko API base: %s", settings.coingecko_base_url)
+    logger.info(
+        "CoinGecko API key configured: %s (plan=%s)",
+        bool(settings.COINGECKO_API_KEY),
+        settings.COINGECKO_PLAN,
+    )
     if settings.SUPABASE_JWT_SECRET:
         logger.info("Supabase JWT validation: HS256 secret configured")
     elif settings.SUPABASE_URL:

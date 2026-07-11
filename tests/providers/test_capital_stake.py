@@ -187,6 +187,44 @@ async def test_capital_stake_get_indices_filters_idx_rows():
 
 
 @pytest.mark.asyncio
+async def test_capital_stake_get_indices_prefers_market_indices_endpoint():
+    calls: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls.append(request.url.path)
+        if request.url.path.endswith("/market/indices"):
+            return httpx.Response(
+                200,
+                json={
+                    "status": "ok",
+                    "data": [
+                        {"code": "KSE100", "name": "KSE 100 INDEX", "close": 181000, "change_percent": -0.002},
+                        {"code": "KSE30", "name": "KSE 30 INDEX", "close": 54000, "change_percent": 0.01},
+                    ],
+                },
+            )
+        return httpx.Response(404, json={"status": "error"})
+
+    transport = httpx.MockTransport(handler)
+    http = AsyncHTTPClient("https://uat.csapis.com/3.0", provider_name="capital_stake")
+    http._client = httpx.AsyncClient(transport=transport, base_url="https://uat.csapis.com/3.0")
+    client = CapitalStakeClient(http=http)
+    indices = await client.get_indices()
+    rows = client._unwrap_data(indices)
+    assert calls[0].endswith("/market/indices")
+    assert len(rows) == 2
+    assert rows[0]["code"] == "KSE100"
+    await http.aclose()
+
+
+def test_is_index_row_does_not_treat_rights_shares_as_indices():
+    rights_share = {"symbol": "KSBPR", "name": "KSB Pumps (R)", "type": 2}
+    index_row = {"code": "KSE100", "name": "KSE 100 INDEX", "close": 181000, "type": 1}
+    assert CapitalStakeClient._is_index_row(index_row) is True
+    assert CapitalStakeClient._is_index_row(rights_share) is False
+
+
+@pytest.mark.asyncio
 async def test_psx_proxy_get_all_prices():
     def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(200, json={"prices": [{"ticker": "HBL", "price": 100}]})

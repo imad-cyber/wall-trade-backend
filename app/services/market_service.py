@@ -177,6 +177,16 @@ class MarketService:
         cache_key = "market:summary"
 
         async def fetch():
+            featured_raw: dict[str, Any] | None = None
+            try:
+                featured_raw = self.capital_stake._unwrap_data(
+                    await self.capital_stake.get_index("KSE100")
+                )
+                if not isinstance(featured_raw, dict):
+                    featured_raw = None
+            except ExternalServiceError:
+                featured_raw = None
+
             indices_raw = self.capital_stake._unwrap_data(await self.capital_stake.get_indices())
             indices_list = indices_raw if isinstance(indices_raw, list) else _rows_from_list(indices_raw)
 
@@ -198,32 +208,21 @@ class MarketService:
             except ExternalServiceError:
                 pass
 
-            featured_symbol = "KSE100"
-            for row in indices_list:
-                if not isinstance(row, dict):
-                    continue
-                symbol = str(
-                    row.get("symbol")
-                    or row.get("ticker")
-                    or row.get("code")
-                    or row.get("s")
-                    or ""
-                ).upper()
-                normalized = symbol.replace("-", "").replace("_", "")
-                if normalized == "KSE100" or "KSE100" in normalized:
-                    featured_symbol = symbol or "KSE100"
-                    break
-
             chart_points = []
             try:
                 eod_raw = self.capital_stake._unwrap_data(
-                    await self.capital_stake.get_eod_data(featured_symbol, lookback_days=35)
+                    await self.capital_stake.get_eod_data("KSE100", lookback_days=35)
                 )
-                chart_points = map_ohlcv(featured_symbol, eod_raw, "1mo", "1d").points
+                chart_points = map_ohlcv("KSE100", eod_raw, "1mo", "1d").points
             except ExternalServiceError:
                 chart_points = []
 
-            return map_market_summary(indices_list, chart_points, market_status=market_status)
+            return map_market_summary(
+                indices_list,
+                chart_points,
+                market_status=market_status,
+                featured_raw=featured_raw,
+            )
 
         return await self._cached(cache_key, SUMMARY_CACHE_TTL, fetch)
 

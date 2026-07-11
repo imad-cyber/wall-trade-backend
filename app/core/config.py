@@ -45,6 +45,11 @@ class Settings(BaseSettings):
     FMP_API_KEY: Optional[str] = None
     FMP_BASE_URL: str = "https://financialmodelingprep.com/api/v3"
 
+    # CoinGecko — set COINGECKO_PLAN to "pro" or "demo" (keys both start with CG-)
+    COINGECKO_API_KEY: Optional[str] = None
+    COINGECKO_PLAN: str = "pro"
+    COINGECKO_BASE_URL: Optional[str] = None
+
     # AI
     AI_MODEL: str = "gpt-4o"
     AI_MAX_TOKENS: int = 4096
@@ -157,6 +162,20 @@ class Settings(BaseSettings):
     @property
     def allowed_origins(self) -> list[str]:
         return self.ALLOWED_ORIGINS or self.CORS_ORIGINS
+
+    @property
+    def coingecko_base_url(self) -> str:
+        if self.COINGECKO_BASE_URL:
+            return self.COINGECKO_BASE_URL.rstrip("/")
+        if self.COINGECKO_PLAN.lower() == "demo":
+            return "https://api.coingecko.com/api/v3"
+        return "https://pro-api.coingecko.com/api/v3"
+
+    @property
+    def coingecko_api_key_header(self) -> str:
+        if self.COINGECKO_PLAN.lower() == "demo":
+            return "x-cg-demo-api-key"
+        return "x-cg-pro-api-key"
 
 
 @lru_cache()

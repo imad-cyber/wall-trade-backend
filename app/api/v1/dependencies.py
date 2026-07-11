@@ -6,6 +6,7 @@ from app.ai.prompt_builder import PromptBuilder
 from app.dependencies import get_db_dependency, get_service_db_dependency
 from app.providers.capital_stake.client import CapitalStakeClient
 from app.providers.psx_proxy.client import PSXProxyClient
+from app.providers.coingecko.client import CoinGeckoClient
 from app.providers.fmp.client import FMPClient
 from app.repositories.alerts_repository import AlertsRepository
 from app.repositories.analysis_repository import AnalysisRepository
@@ -25,6 +26,7 @@ from app.services.alerts_service import AlertsService
 from app.services.analysis_service import AnalysisService
 from app.services.cache_service import CacheService
 from app.services.company_service import CompanyService
+from app.services.crypto_service import CryptoService
 from app.services.financials_service import FinancialsService
 from app.services.macro_service import MacroService
 from app.services.market_feel_service import MarketFeelService
@@ -103,6 +105,16 @@ def get_psx_client() -> PSXProxyClient:
 
 def get_fmp_client() -> FMPClient:
     return FMPClient()
+
+
+def get_coingecko_client() -> CoinGeckoClient:
+    return CoinGeckoClient()
+
+
+def get_crypto_service(
+    client: CoinGeckoClient = Depends(get_coingecko_client),
+) -> CryptoService:
+    return CryptoService(client)
 
 
 def get_cache_service(repo: AnalysisRepository = Depends(get_analysis_repo)) -> CacheService:

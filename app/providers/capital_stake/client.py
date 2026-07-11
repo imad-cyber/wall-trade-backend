@@ -200,6 +200,14 @@ class CapitalStakeClient:
         return await self._get_json("/market/sectors")
 
     async def get_indices(self) -> dict[str, Any]:
+        """Return PSX index rows — prefer /market/indices over stock ticker lists."""
+        try:
+            raw = await self._get_json("/market/indices")
+            rows = self._rows_from_payload(self._unwrap_data(raw))
+            if rows:
+                return {"status": "ok", "data": rows}
+        except ExternalServiceError:
+            pass
         rows = await self._fetch_ticker_list(index_only=True)
         if rows:
             return {"status": "ok", "data": rows}
@@ -305,7 +313,10 @@ class CapitalStakeClient:
         return quote_raw, quote_raw
 
     async def _fetch_ticker_list(self, *, index_only: bool = False) -> list[dict[str, Any]]:
-        for path in TICKER_LIST_PATHS:
+        paths: tuple[str, ...] = (
+            ("/market/indices",) + TICKER_LIST_PATHS if index_only else TICKER_LIST_PATHS
+        )
+        for path in paths:
             try:
                 raw = await self._get_json(path)
             except ExternalServiceError:
@@ -366,14 +377,21 @@ class CapitalStakeClient:
         if row.get("m") == "IDX":
             return True
         symbol = str(
-            row.get("symbol", row.get("s", row.get("ticker", row.get("code", ""))))
+            row.get("code") or row.get("symbol") or row.get("s") or row.get("ticker") or ""
         ).upper()
         if symbol in KNOWN_INDEX_SYMBOLS:
             return True
-        if row.get("code") and row.get("close") is not None and not row.get("symbol") and not row.get("s"):
+        # Indices overview rows expose `code` + `close` without stock ticker fields.
+        if (
+            row.get("code")
+            and row.get("close") is not None
+            and not row.get("symbol")
+            and not row.get("s")
+        ):
             return True
         row_type = row.get("type")
-        return row_type in (0, 2, "2", "index", "IDX")
+        # CS API: type 1 (and sometimes 0) on /market/indices; type 2 = rights on /market/stocks.
+        return row_type in (0, 1, "0", "1", "index", "IDX")
 
     async def _get_json(
         self,
